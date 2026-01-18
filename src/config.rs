@@ -39,7 +39,9 @@ impl AppConfig {
     pub fn load() -> Result<Self> {
         let path = Self::path()?;
         if !path.exists() {
-            return Ok(Self::default());
+            let config = Self::default();
+            config.save()?;
+            return Ok(config);
         }
         let content = fs::read_to_string(&path)?;
         toml::from_str(&content)
