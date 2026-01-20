@@ -3,16 +3,17 @@
 //! Provides LAN discovery via mDNS and file transfer via request-response protocol.
 
 mod codec;
-pub mod node;
 pub mod messages;
+pub mod node;
+pub mod peer_store;
 pub mod protocol;
 pub mod recovery;
 pub mod service;
 
-pub use node::P2PNode;
 pub use messages::{
-    FileChunk, FileMeta, FileRequest, FileResponse, RsBlock, RsHave, ZoneRequest, ZoneResponse,
-    FILE_CHUNK_SIZE,
+    FILE_CHUNK_SIZE, FileChunk, FileMeta, FileRequest, FileResponse, RsBlock, RsHave, ZoneRequest,
+    ZoneResponse,
 };
+pub use node::P2PNode;
 pub use protocol::PeerEntry;
 pub use service::P2PService;

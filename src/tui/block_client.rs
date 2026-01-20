@@ -30,7 +30,7 @@ impl BlockClient {
     }
 
     /// Get a block directly from a remote address.
-    /// 
+    ///
     /// `ip` should be the IP address of the remote node (e.g., "172.18.36.82")
     pub async fn get_block(&mut self, ip: &str, hash: &str) -> Result<RsBlock> {
         let addr = format!("{}:{}", ip, BLOCK_SERVER_PORT);
@@ -39,13 +39,11 @@ impl BlockClient {
         let stream = if let Some(stream) = self.connections.get_mut(ip) {
             stream
         } else {
-            let stream = tokio::time::timeout(
-                self.timeout,
-                TcpStream::connect(&addr)
-            ).await
+            let stream = tokio::time::timeout(self.timeout, TcpStream::connect(&addr))
+                .await
                 .map_err(|_| AppError::Io(std::io::Error::other("Connection timeout")))?
                 .map_err(|e| AppError::Io(e))?;
-            
+
             self.connections.insert(ip.to_string(), stream);
             self.connections.get_mut(ip).unwrap()
         };
@@ -53,7 +51,7 @@ impl BlockClient {
         // Send request: [4 bytes: hash length] + [hash bytes]
         let hash_bytes = hash.as_bytes();
         let hash_len = (hash_bytes.len() as u32).to_be_bytes();
-        
+
         if let Err(e) = stream.write_all(&hash_len).await {
             // Connection failed, remove and return error
             self.connections.remove(ip);
@@ -81,9 +79,10 @@ impl BlockClient {
 
         if status != STATUS_OK {
             self.connections.remove(ip);
-            return Err(AppError::Io(std::io::Error::other(
-                format!("Block server error: status={}", status)
-            )));
+            return Err(AppError::Io(std::io::Error::other(format!(
+                "Block server error: status={}",
+                status
+            ))));
         }
 
         // Read data
@@ -100,7 +99,7 @@ impl BlockClient {
     }
 
     /// Extract IP address from a multiaddr string.
-    /// 
+    ///
     /// Example: "/ip4/172.18.36.82/tcp/10826/p2p/12D3..." -> "172.18.36.82"
     pub fn extract_ip(multiaddr: &str) -> Option<String> {
         let parts: Vec<&str> = multiaddr.split('/').collect();

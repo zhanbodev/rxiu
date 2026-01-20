@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::renew::VersionInfo;
 use crate::rs::RsFileEntry;
 use crate::storage::FileMetadata;
 
@@ -57,7 +58,12 @@ pub enum FileRequest {
     /// Request file metadata for chunked download.
     GetFileMeta { zone: String, name: String },
     /// Request a file chunk.
-    GetFileChunk { zone: String, name: String, offset: u64, size: u64 },
+    GetFileChunk {
+        zone: String,
+        name: String,
+        offset: u64,
+        size: u64,
+    },
     /// RS: list shared files.
     RsList,
     /// RS: announce file metadata.
@@ -74,6 +80,10 @@ pub enum FileRequest {
     RsHave { name: String },
     /// Get known peers from this node.
     GetPeers,
+    /// Renew: get version information.
+    RenewGetVersion,
+    /// Renew: get a chunk of the binary.
+    RenewGetBinaryChunk { offset: u64, length: u32 },
 }
 
 /// Response types for the file protocol.
@@ -84,10 +94,13 @@ pub enum FileResponse {
     /// List of zone names.
     Zones(Vec<String>),
     /// List of files in a zone.
-    Files { zone: String, files: Vec<FileMetadata> },
+    Files {
+        zone: String,
+        files: Vec<FileMetadata>,
+    },
     /// File content.
-    FileData { 
-        name: String, 
+    FileData {
+        name: String,
         content: Vec<u8>,
         hash: String,
     },
@@ -111,6 +124,14 @@ pub enum FileResponse {
     Peers(Vec<PeerEntry>),
     /// Error response.
     Error(String),
+    /// Renew: version information.
+    RenewVersion(VersionInfo),
+    /// Renew: binary chunk.
+    RenewBinaryChunk {
+        offset: u64,
+        data: Vec<u8>,
+        is_last: bool,
+    },
 }
 
 /// Request for zone info.

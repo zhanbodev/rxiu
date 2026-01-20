@@ -8,6 +8,7 @@ pub mod config;
 pub mod daemon;
 pub mod error;
 pub mod p2p;
+pub mod renew;
 pub mod rs;
 pub mod storage;
 pub mod tui;

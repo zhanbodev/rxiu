@@ -93,7 +93,7 @@ async fn handle_block_client(
                 // [4 bytes: status] + [4 bytes: data length] + [data]
                 let status = STATUS_OK.to_be_bytes();
                 let data_len = (data.len() as u32).to_be_bytes();
-                
+
                 stream.write_all(&status).await?;
                 stream.write_all(&data_len).await?;
                 stream.write_all(&data).await?;

@@ -1,30 +1,31 @@
 //! TUI Application state and main loop.
+use super::block_client::BlockClient;
+use super::input::handle_input;
+use super::render::render;
+use crate::config::AppConfig;
+use crate::daemon::P2PProxy;
+use crate::error::{AppError, Result};
+use crate::p2p::node::PeerInfo;
+use crate::renew::version::BUILD_VERSION;
+use crate::rs::sync::prune_unowned_blocks;
+use crate::rs::{RsFileEntry, RsStore};
+use crate::storage::ZoneManager;
+use crate::ui::{BrowserMode, FileBrowser};
+use crossterm::ExecutableCommand;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use futures::stream::{FuturesUnordered, StreamExt};
+use libp2p::PeerId;
+use ratatui::Terminal;
+use ratatui::prelude::*;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::ExecutableCommand;
-use libp2p::PeerId;
-use ratatui::prelude::*;
-use ratatui::Terminal;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
-use futures::stream::{FuturesUnordered, StreamExt};
-use crate::config::AppConfig;
-use crate::error::{AppError, Result};
-use crate::daemon::P2PProxy;
-use crate::p2p::node::PeerInfo;
-use crate::rs::{RsFileEntry, RsStore};
-use crate::rs::sync::prune_unowned_blocks;
-use crate::storage::ZoneManager;
-use crate::ui::{BrowserMode, FileBrowser};
-use super::block_client::BlockClient;
-use super::input::handle_input;
-use super::render::render;
 /// Output line with optional styling.
 #[derive(Debug, Clone)]
 pub struct OutputLine {
@@ -42,19 +43,34 @@ pub enum LineStyle {
 }
 impl OutputLine {
     pub fn normal(s: impl Into<String>) -> Self {
-        Self { content: s.into(), style: LineStyle::Normal }
+        Self {
+            content: s.into(),
+            style: LineStyle::Normal,
+        }
     }
     pub fn success(s: impl Into<String>) -> Self {
-        Self { content: s.into(), style: LineStyle::Success }
+        Self {
+            content: s.into(),
+            style: LineStyle::Success,
+        }
     }
     pub fn error(s: impl Into<String>) -> Self {
-        Self { content: s.into(), style: LineStyle::Error }
+        Self {
+            content: s.into(),
+            style: LineStyle::Error,
+        }
     }
     pub fn info(s: impl Into<String>) -> Self {
-        Self { content: s.into(), style: LineStyle::Info }
+        Self {
+            content: s.into(),
+            style: LineStyle::Info,
+        }
     }
     pub fn header(s: impl Into<String>) -> Self {
-        Self { content: s.into(), style: LineStyle::Header }
+        Self {
+            content: s.into(),
+            style: LineStyle::Header,
+        }
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -139,11 +155,13 @@ async fn download_file_chunked(
     }
     file.seek(SeekFrom::Start(resume_offset))?;
     if resume_offset > 0 {
-        let _ = progress_tx.send(TransferResult::Progress {
-            file_name: name.to_string(),
-            bytes_done: resume_offset,
-            bytes_total: meta.size,
-        }).await;
+        let _ = progress_tx
+            .send(TransferResult::Progress {
+                file_name: name.to_string(),
+                bytes_done: resume_offset,
+                bytes_total: meta.size,
+            })
+            .await;
     }
     let mut offset = resume_offset;
     while offset < meta.size {
@@ -156,9 +174,7 @@ async fn download_file_chunked(
                 .get_file_chunk(peer_id, zone, name, offset, chunk_size)
                 .await?;
             if chunk.offset != offset {
-                return Err(AppError::Io(std::io::Error::other(
-                    "Chunk offset mismatch",
-                )));
+                return Err(AppError::Io(std::io::Error::other("Chunk offset mismatch")));
             }
             let hash = sha256_bytes(&chunk.data);
             if hash == chunk.hash {
@@ -173,11 +189,13 @@ async fn download_file_chunked(
         file.seek(SeekFrom::Start(chunk.offset))?;
         file.write_all(&chunk.data)?;
         offset += chunk.data.len() as u64;
-        let _ = progress_tx.send(TransferResult::Progress {
-            file_name: name.to_string(),
-            bytes_done: offset,
-            bytes_total: meta.size,
-        }).await;
+        let _ = progress_tx
+            .send(TransferResult::Progress {
+                file_name: name.to_string(),
+                bytes_done: offset,
+                bytes_total: meta.size,
+            })
+            .await;
     }
     file.flush()?;
     file.sync_all()?;
@@ -202,18 +220,21 @@ async fn download_rs_file(
 ) -> Result<(PathBuf, u64, String)> {
     // Extract peer IDs and IP addresses for direct connections
     let peers: Vec<PeerId> = peer_infos.iter().map(|p| p.peer_id).collect();
-    let peer_ips: Vec<Option<String>> = peer_infos.iter().map(|p| {
-        for addr in &p.addrs {
-            if let Some(ip) = BlockClient::extract_ip(&addr.to_string()) {
-                return Some(ip);
+    let peer_ips: Vec<Option<String>> = peer_infos
+        .iter()
+        .map(|p| {
+            for addr in &p.addrs {
+                if let Some(ip) = BlockClient::extract_ip(&addr.to_string()) {
+                    return Some(ip);
+                }
             }
-        }
-        None
-    }).collect();
+            None
+        })
+        .collect();
     let rs_store = RsStore::new()?;
-    let mut entry = rs_store.get_file(file_name)?.ok_or_else(|| {
-        AppError::Io(std::io::Error::other("RS metadata not found locally"))
-    })?;
+    let mut entry = rs_store
+        .get_file(file_name)?
+        .ok_or_else(|| AppError::Io(std::io::Error::other("RS metadata not found locally")))?;
     if entry.blocks.is_empty() {
         if let Some(ref p2p) = p2p {
             for peer in &peers {
@@ -237,7 +258,7 @@ async fn download_rs_file(
             "Destination file already exists",
         )));
     }
-    
+
     // Calculate initial progress from already-synced blocks
     let mut downloaded = 0u64;
     for block in &entry.blocks {
@@ -245,7 +266,7 @@ async fn download_rs_file(
             downloaded += block.size;
         }
     }
-    
+
     // Send initial progress if we have some blocks already
     if downloaded > 0 {
         let _ = progress_tx
@@ -256,7 +277,7 @@ async fn download_rs_file(
             })
             .await;
     }
-    
+
     let peer_count = peers.len();
     if peer_count == 0 {
         return Err(AppError::Io(std::io::Error::other(
@@ -325,12 +346,18 @@ async fn download_rs_file(
                 ids
             };
             members.sort();
-            let _ = prune_unowned_blocks(&rs_store, &local_id, &members);
+            let _ = prune_unowned_blocks(&rs_store, &local_id, &members, 2);
         }
         return Ok((dest_path, entry.size, entry.hash));
     }
 
-    let stats = Mutex::new(vec![PeerStat { score: 1.0, in_flight: 0 }; peer_count]);
+    let stats = Mutex::new(vec![
+        PeerStat {
+            score: 1.0,
+            in_flight: 0
+        };
+        peer_count
+    ]);
     let total_limit = (concurrency.max(1) * peer_count).min(32);
     let max_attempts = 6u8;
     let mut tasks = FuturesUnordered::new();
@@ -363,10 +390,10 @@ async fn download_rs_file(
             let peer_ip = peer_ips[peer_idx].clone();
             let peer = peers[peer_idx];
             let p2p = p2p.clone();
-            
+
             tasks.push(async move {
                 let start = Instant::now();
-                
+
                 // Try direct connection first if we have IP
                 let result = if let Some(ip) = peer_ip {
                     // Create a new client for this request (avoid mutex contention)
@@ -376,9 +403,11 @@ async fn download_rs_file(
                     // Fallback to IPC
                     p2p.rs_get_block(peer, &hash).await
                 } else {
-                    Err(AppError::Io(std::io::Error::other("No connection available")))
+                    Err(AppError::Io(std::io::Error::other(
+                        "No connection available",
+                    )))
                 };
-                
+
                 let elapsed = start.elapsed();
                 (peer_idx, block, result, elapsed)
             });
@@ -443,7 +472,7 @@ async fn download_rs_file(
             ids
         };
         members.sort();
-        let _ = prune_unowned_blocks(&rs_store, &local_id, &members);
+        let _ = prune_unowned_blocks(&rs_store, &local_id, &members, 2);
     }
 
     Ok((dest_path, entry.size, entry.hash))
@@ -492,11 +521,23 @@ pub enum AppMode {
 /// What to do after file browser completes.
 #[derive(Debug, Clone)]
 pub enum BrowserCallback {
-    Put { target_name: Option<String> },
-    Get { file_name: String },
-    RemoteGet { peer_index: usize, zone: String, file_name: String },
-    RsPut { target_name: Option<String> },
-    RsGet { file_name: String },
+    Put {
+        target_name: Option<String>,
+    },
+    Get {
+        file_name: String,
+    },
+    RemoteGet {
+        peer_index: usize,
+        zone: String,
+        file_name: String,
+    },
+    RsPut {
+        target_name: Option<String>,
+    },
+    RsGet {
+        file_name: String,
+    },
 }
 /// Pending async operation.
 #[derive(Debug, Clone)]
@@ -506,9 +547,9 @@ pub enum PendingOperation {
     /// Query files from a peer's zone.
     QueryFiles { peer_index: usize, zone: String },
     /// Download a file from a peer to a local path.
-    DownloadFile { 
-        peer_index: usize, 
-        zone: String, 
+    DownloadFile {
+        peer_index: usize,
+        zone: String,
         file_name: String,
         save_path: std::path::PathBuf,
     },
@@ -560,7 +601,7 @@ impl TransferProgress {
             ((self.bytes_done as f64 / self.bytes_total as f64) * 100.0) as u8
         }
     }
-    
+
     pub fn format_size(bytes: u64) -> String {
         if bytes >= 1_073_741_824 {
             format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
@@ -572,7 +613,7 @@ impl TransferProgress {
             format!("{} B", bytes)
         }
     }
-    
+
     pub fn start_download(&mut self, file_name: &str, total_bytes: u64) {
         self.active = true;
         self.transfer_type = "download".to_string();
@@ -580,7 +621,7 @@ impl TransferProgress {
         self.bytes_done = 0;
         self.bytes_total = total_bytes;
     }
-    
+
     pub fn start_upload(&mut self, file_name: &str, total_bytes: u64) {
         self.active = true;
         self.transfer_type = "upload".to_string();
@@ -588,21 +629,33 @@ impl TransferProgress {
         self.bytes_done = 0;
         self.bytes_total = total_bytes;
     }
-    
+
     pub fn complete(&mut self) {
         self.active = false;
         self.bytes_done = self.bytes_total;
     }
-    
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }
 }
 /// Result from a background transfer.
 pub enum TransferResult {
-    Progress { file_name: String, bytes_done: u64, bytes_total: u64 },
-    Success { file_name: String, path: std::path::PathBuf, size: u64, hash: String },
-    Error { file_name: String, error: String },
+    Progress {
+        file_name: String,
+        bytes_done: u64,
+        bytes_total: u64,
+    },
+    Success {
+        file_name: String,
+        path: std::path::PathBuf,
+        size: u64,
+        hash: String,
+    },
+    Error {
+        file_name: String,
+        error: String,
+    },
 }
 /// Main application state.
 pub struct App {
@@ -657,7 +710,7 @@ impl App {
             cursor_pos: 0,
             output_lines: vec![
                 OutputLine::header("╔════════════════════════════════════════╗"),
-                OutputLine::header("║     RXIU v0.3.0 - File Zone Manager  ║"),
+                OutputLine::header(format!("║ RXIU {} - File Zone Manager ║", BUILD_VERSION)),
                 OutputLine::header("║     Type 'help' for commands           ║"),
                 OutputLine::header("╚════════════════════════════════════════╝"),
                 OutputLine::normal(""),
@@ -713,10 +766,8 @@ impl App {
 pub fn run_app() -> Result<()> {
     // Build async runtime
     let rt = tokio::runtime::Runtime::new()?;
-    
-    rt.block_on(async {
-        run_app_async().await
-    })
+
+    rt.block_on(async { run_app_async().await })
 }
 /// Async entry point.
 async fn run_app_async() -> Result<()> {
@@ -731,11 +782,16 @@ async fn run_app_async() -> Result<()> {
     // Connect to P2P daemon
     match P2PProxy::connect() {
         Ok(proxy) => {
-            app.print(OutputLine::success("Connected to P2P daemon. Discovering peers..."));
+            app.print(OutputLine::success(
+                "Connected to P2P daemon. Discovering peers...",
+            ));
             app.p2p = Some(proxy);
         }
         Err(e) => {
-            app.print(OutputLine::error(format!("Failed to connect to daemon: {}", e)));
+            app.print(OutputLine::error(format!(
+                "Failed to connect to daemon: {}",
+                e
+            )));
             app.print(OutputLine::info("Try running: rxiu daemon start"));
         }
     }
@@ -747,28 +803,41 @@ async fn run_app_async() -> Result<()> {
     terminal.show_cursor()?;
     result
 }
-async fn main_loop_async(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
+async fn main_loop_async(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+) -> Result<()> {
     let mut peer_update_interval = tokio::time::interval(Duration::from_secs(2));
     loop {
         // Process pending async operations (non-blocking ones)
         if let Some(op) = app.pending_op.take() {
             process_pending_operation(app, op).await;
         }
-        
+
         // Check for background transfer results
         if let Some(ref mut rx) = app.transfer_rx {
             match rx.try_recv() {
-                Ok(TransferResult::Progress { file_name, bytes_done, bytes_total }) => {
+                Ok(TransferResult::Progress {
+                    file_name,
+                    bytes_done,
+                    bytes_total,
+                }) => {
                     if app.transfer.file_name == file_name {
                         app.transfer.bytes_done = bytes_done;
                         app.transfer.bytes_total = bytes_total;
                     }
                 }
-                Ok(TransferResult::Success { file_name, path, size, hash }) => {
+                Ok(TransferResult::Success {
+                    file_name,
+                    path,
+                    size,
+                    hash,
+                }) => {
                     app.transfer.reset();
                     app.print(OutputLine::success(format!(
                         "✅ Downloaded '{}' to {}",
-                        file_name, path.display()
+                        file_name,
+                        path.display()
                     )));
                     app.print(OutputLine::info(format!(
                         "   {} bytes, hash: {}...",
@@ -792,7 +861,9 @@ async fn main_loop_async(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app:
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     app.transfer.reset();
-                    app.print(OutputLine::error("Download task disconnected unexpectedly."));
+                    app.print(OutputLine::error(
+                        "Download task disconnected unexpectedly.",
+                    ));
                     app.transfer_rx = None;
                 }
             }
@@ -843,17 +914,20 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 app.print(OutputLine::error("Peer no longer available."));
                 return;
             }
-            
+
             let peer_id = app.peers_cache[peer_index].peer_id;
             let peer_id_short = peer_id.to_string();
-            let peer_id_short = if peer_id_short.len() >= 12 { 
-                &peer_id_short[..12] 
-            } else { 
-                &peer_id_short 
+            let peer_id_short = if peer_id_short.len() >= 12 {
+                &peer_id_short[..12]
+            } else {
+                &peer_id_short
             };
-            
-            app.print(OutputLine::info(format!("Querying zones from {}...", peer_id_short)));
-            
+
+            app.print(OutputLine::info(format!(
+                "Querying zones from {}...",
+                peer_id_short
+            )));
+
             if let Some(ref p2p) = app.p2p {
                 match p2p.list_remote_zones(peer_id).await {
                     Ok(zones) => {
@@ -861,13 +935,18 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                             app.print(OutputLine::info("Peer has no zones."));
                         } else {
                             app.print(OutputLine::header(""));
-                            app.print(OutputLine::header(format!("REMOTE ZONES from {}", peer_id_short)));
+                            app.print(OutputLine::header(format!(
+                                "REMOTE ZONES from {}",
+                                peer_id_short
+                            )));
                             app.print(OutputLine::header("─".repeat(50)));
                             for zone in &zones {
                                 app.print(OutputLine::normal(format!("  📁 {}", zone)));
                             }
                             app.print(OutputLine::normal(""));
-                            app.print(OutputLine::info("Use 'ruse <zone>' to select a zone, then 'rlist' to see files."));
+                            app.print(OutputLine::info(
+                                "Use 'ruse <zone>' to select a zone, then 'rlist' to see files.",
+                            ));
                             // Cache zones for ruse command
                             app.remote.zones_cache = zones;
                         }
@@ -878,17 +957,20 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 }
             }
         }
-        
+
         PendingOperation::QueryFiles { peer_index, zone } => {
             if peer_index >= app.peers_cache.len() {
                 app.print(OutputLine::error("Peer no longer available."));
                 return;
             }
-            
+
             let peer_id = app.peers_cache[peer_index].peer_id;
-            
-            app.print(OutputLine::info(format!("Querying files in zone '{}'...", zone)));
-            
+
+            app.print(OutputLine::info(format!(
+                "Querying files in zone '{}'...",
+                zone
+            )));
+
             if let Some(ref p2p) = app.p2p {
                 match p2p.list_remote_files(peer_id, &zone).await {
                     Ok(files) => {
@@ -897,7 +979,11 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                             app.remote.files_cache.clear();
                         } else {
                             app.print(OutputLine::header(""));
-                            app.print(OutputLine::header(format!("FILES in '{}' ({} files)", zone, files.len())));
+                            app.print(OutputLine::header(format!(
+                                "FILES in '{}' ({} files)",
+                                zone,
+                                files.len()
+                            )));
                             app.print(OutputLine::header("─".repeat(50)));
                             for (i, file) in files.iter().enumerate() {
                                 app.print(OutputLine::normal(format!(
@@ -919,22 +1005,29 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 }
             }
         }
-        
-        PendingOperation::DownloadFile { peer_index, zone, file_name, save_path } => {
+
+        PendingOperation::DownloadFile {
+            peer_index,
+            zone,
+            file_name,
+            save_path,
+        } => {
             if peer_index >= app.peers_cache.len() {
                 app.print(OutputLine::error("Peer no longer available."));
                 return;
             }
-            
+
             let peer_id = app.peers_cache[peer_index].peer_id;
-            
+
             // Get expected file size from cache (if available)
-            let expected_size = app.remote.files_cache
+            let expected_size = app
+                .remote
+                .files_cache
                 .iter()
                 .find(|f| f.name == file_name)
                 .map(|f| f.size)
                 .unwrap_or(0);
-            
+
             // Start progress indicator
             app.transfer.start_download(&file_name, expected_size);
             app.print(OutputLine::info(format!(
@@ -942,40 +1035,46 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 file_name,
                 TransferProgress::format_size(expected_size)
             )));
-            
+
             // Clone what we need for the spawned task
             let p2p = app.p2p.clone();
             let zone = zone.clone();
             let file_name = file_name.clone();
             let save_path = save_path.clone();
-            
+
             // Create channel for result
             let (tx, rx) = tokio::sync::mpsc::channel::<TransferResult>(16);
             app.transfer_rx = Some(rx);
-            
+
             // Spawn background download task
             tokio::spawn(async move {
                 if let Some(p2p) = p2p {
-                    match download_file_chunked(&p2p, peer_id, &zone, &file_name, &save_path, &tx).await {
+                    match download_file_chunked(&p2p, peer_id, &zone, &file_name, &save_path, &tx)
+                        .await
+                    {
                         Ok((full_path, size, hash)) => {
-                            let _ = tx.send(TransferResult::Success {
-                                file_name,
-                                path: full_path,
-                                size,
-                                hash,
-                            }).await;
+                            let _ = tx
+                                .send(TransferResult::Success {
+                                    file_name,
+                                    path: full_path,
+                                    size,
+                                    hash,
+                                })
+                                .await;
                         }
                         Err(e) => {
-                            let _ = tx.send(TransferResult::Error {
-                                file_name,
-                                error: e.to_string(),
-                            }).await;
+                            let _ = tx
+                                .send(TransferResult::Error {
+                                    file_name,
+                                    error: e.to_string(),
+                                })
+                                .await;
                         }
                     }
                 }
             });
         }
-        
+
         PendingOperation::QuerySelectedZones => {
             if let Some(peer_index) = app.remote.peer_index {
                 if peer_index >= app.peers_cache.len() {
@@ -983,9 +1082,9 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                     app.remote.peer_index = None;
                     return;
                 }
-                
+
                 let peer_id = app.peers_cache[peer_index].peer_id;
-                
+
                 if let Some(ref p2p) = app.p2p {
                     match p2p.list_remote_zones(peer_id).await {
                         Ok(zones) => {
@@ -1010,16 +1109,17 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 }
             }
         }
-        
+
         PendingOperation::QuerySelectedFiles => {
-            if let (Some(peer_index), Some(zone)) = (app.remote.peer_index, app.remote.zone.clone()) {
+            if let (Some(peer_index), Some(zone)) = (app.remote.peer_index, app.remote.zone.clone())
+            {
                 if peer_index >= app.peers_cache.len() {
                     app.print(OutputLine::error("Selected peer no longer available."));
                     return;
                 }
-                
+
                 let peer_id = app.peers_cache[peer_index].peer_id;
-                
+
                 if let Some(ref p2p) = app.p2p {
                     match p2p.list_remote_files(peer_id, &zone).await {
                         Ok(files) => {
@@ -1028,7 +1128,11 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                                 app.remote.files_cache.clear();
                             } else {
                                 app.print(OutputLine::header(""));
-                                app.print(OutputLine::header(format!("📁 {} ({} files)", zone, files.len())));
+                                app.print(OutputLine::header(format!(
+                                    "📁 {} ({} files)",
+                                    zone,
+                                    files.len()
+                                )));
                                 app.print(OutputLine::header("─".repeat(50)));
                                 for (i, file) in files.iter().enumerate() {
                                     app.print(OutputLine::normal(format!(
@@ -1067,7 +1171,10 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                         app.print(OutputLine::info("RS shared space is empty."));
                     } else {
                         app.print(OutputLine::header(""));
-                        app.print(OutputLine::header(format!("RS FILES ({} files)", files.len())));
+                        app.print(OutputLine::header(format!(
+                            "RS FILES ({} files)",
+                            files.len()
+                        )));
                         app.print(OutputLine::header("─".repeat(50)));
                         for (i, file) in files.iter().enumerate() {
                             let status = if file.complete { "complete" } else { "partial" };
@@ -1080,7 +1187,9 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                             )));
                         }
                         app.print(OutputLine::normal(""));
-                        app.print(OutputLine::info("Use 'rsget <number>' or 'rsget <file_name>' to download."));
+                        app.print(OutputLine::info(
+                            "Use 'rsget <number>' or 'rsget <file_name>' to download.",
+                        ));
                     }
                 }
                 Err(e) => {
@@ -1097,16 +1206,32 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                 Ok(status) => {
                     if verbose {
                         let mode = if app.rs_mode { "RS" } else { "default" };
-                        let sync_state = if status.in_progress { "running" } else { "idle" };
+                        let sync_state = if status.in_progress {
+                            "running"
+                        } else {
+                            "idle"
+                        };
                         app.print(OutputLine::header(""));
                         app.print(OutputLine::header("RS STATUS"));
                         app.print(OutputLine::header("─".repeat(40)));
                         app.print(OutputLine::normal(format!("  Mode: {}", mode)));
                         app.print(OutputLine::normal(format!("  Sync: {}", sync_state)));
-                        app.print(OutputLine::normal(format!("  Download concurrency: {}", status.download_concurrency)));
-                        app.print(OutputLine::normal(format!("  Sync concurrency: {}", status.sync_concurrency)));
-                        app.print(OutputLine::normal(format!("  Global sync: {}", if status.global_sync { 1 } else { 0 })));
-                        app.print(OutputLine::normal(format!("  Block size: {} MB", status.block_size_mb)));
+                        app.print(OutputLine::normal(format!(
+                            "  Download concurrency: {}",
+                            status.download_concurrency
+                        )));
+                        app.print(OutputLine::normal(format!(
+                            "  Sync concurrency: {}",
+                            status.sync_concurrency
+                        )));
+                        app.print(OutputLine::normal(format!(
+                            "  Global sync: {}",
+                            if status.global_sync { 1 } else { 0 }
+                        )));
+                        app.print(OutputLine::normal(format!(
+                            "  Block size: {} MB",
+                            status.block_size_mb
+                        )));
                         if status.last_updated_files > 0 {
                             app.print(OutputLine::normal(format!(
                                 "  Last updated: {} file(s)",
@@ -1144,11 +1269,17 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
                     }
                 }
                 Err(e) => {
-                    app.print(OutputLine::error(format!("Failed to fetch RS sync status: {}", e)));
+                    app.print(OutputLine::error(format!(
+                        "Failed to fetch RS sync status: {}",
+                        e
+                    )));
                 }
             }
         }
-        PendingOperation::RsDownload { file_name, save_path } => {
+        PendingOperation::RsDownload {
+            file_name,
+            save_path,
+        } => {
             let expected_size = app
                 .rs_store
                 .get_file(&file_name)
@@ -1168,20 +1299,26 @@ async fn process_pending_operation(app: &mut App, op: PendingOperation) {
             app.transfer_rx = Some(rx);
             let concurrency = app.rs_concurrency;
             tokio::spawn(async move {
-                match download_rs_file(p2p, peer_infos, &file_name, &save_path, &tx, concurrency).await {
+                match download_rs_file(p2p, peer_infos, &file_name, &save_path, &tx, concurrency)
+                    .await
+                {
                     Ok((full_path, size, hash)) => {
-                        let _ = tx.send(TransferResult::Success {
-                            file_name,
-                            path: full_path,
-                            size,
-                            hash,
-                        }).await;
+                        let _ = tx
+                            .send(TransferResult::Success {
+                                file_name,
+                                path: full_path,
+                                size,
+                                hash,
+                            })
+                            .await;
                     }
                     Err(e) => {
-                        let _ = tx.send(TransferResult::Error {
-                            file_name,
-                            error: e.to_string(),
-                        }).await;
+                        let _ = tx
+                            .send(TransferResult::Error {
+                                file_name,
+                                error: e.to_string(),
+                            })
+                            .await;
                     }
                 }
             });

@@ -10,8 +10,8 @@
 //! - Encrypted storage (wrapping another backend)
 //! - Cloud storage (S3, GCS)
 
-use crate::error::Result;
 use super::FileMetadata;
+use crate::error::Result;
 
 /// Contract for storage backend implementations.
 ///

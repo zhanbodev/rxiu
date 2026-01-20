@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::p2p::node::PeerInfo;
 use crate::p2p::messages::{FileChunk, FileMeta, RsBlock, RsHave};
+use crate::p2p::node::PeerInfo;
 use crate::rs::RsFileEntry;
 use crate::storage::FileMetadata;
 
@@ -41,11 +41,25 @@ pub enum DaemonRequest {
     /// List files in a remote zone.
     ListRemoteFiles { peer_id: String, zone: String },
     /// Fetch a file from a remote peer.
-    FetchFile { peer_id: String, zone: String, name: String },
+    FetchFile {
+        peer_id: String,
+        zone: String,
+        name: String,
+    },
     /// Get file metadata.
-    GetFileMeta { peer_id: String, zone: String, name: String },
+    GetFileMeta {
+        peer_id: String,
+        zone: String,
+        name: String,
+    },
     /// Get file chunk.
-    GetFileChunk { peer_id: String, zone: String, name: String, offset: u64, size: u64 },
+    GetFileChunk {
+        peer_id: String,
+        zone: String,
+        name: String,
+        offset: u64,
+        size: u64,
+    },
     /// RS: list files from a peer.
     RsList { peer_id: String },
     /// RS: announce a file.
@@ -55,7 +69,10 @@ pub enum DaemonRequest {
     /// RS: get a block.
     RsGetBlock { peer_id: String, hash: String },
     /// RS: get multiple blocks.
-    RsGetBlocks { peer_id: String, hashes: Vec<String> },
+    RsGetBlocks {
+        peer_id: String,
+        hashes: Vec<String>,
+    },
     /// RS: ask which blocks a peer has for a file.
     RsHave { peer_id: String, name: String },
     /// RS: delete a file.

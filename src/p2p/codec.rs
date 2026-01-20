@@ -1,15 +1,10 @@
 use async_trait::async_trait;
 use cbor4ii::core::error::DecodeError;
 use futures::prelude::*;
-use libp2p::request_response;
 use libp2p::StreamProtocol;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    collections::TryReserveError,
-    convert::Infallible,
-    io,
-    marker::PhantomData,
-};
+use libp2p::request_response;
+use serde::{Serialize, de::DeserializeOwned};
+use std::{collections::TryReserveError, convert::Infallible, io, marker::PhantomData};
 
 const REQUEST_SIZE_MAXIMUM: u64 = 1024 * 1024;
 const RESPONSE_SIZE_MAXIMUM: u64 = 64 * 1024 * 1024;

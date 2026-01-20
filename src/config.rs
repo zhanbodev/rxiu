@@ -16,6 +16,11 @@ pub struct AppConfig {
     pub rs_sync_concurrency: usize,
     pub rs_block_size_mb: u64,
     pub rs_global_sync: bool,
+    pub rs_replication_factor: usize,
+    /// Enable P2P auto-update
+    pub renew_enabled: bool,
+    /// Auto-update check interval in seconds
+    pub renew_check_interval: u64,
 }
 
 impl Default for AppConfig {
@@ -25,6 +30,9 @@ impl Default for AppConfig {
             rs_sync_concurrency: 4,
             rs_block_size_mb: 16,
             rs_global_sync: true,
+            rs_replication_factor: 2,
+            renew_enabled: true,
+            renew_check_interval: 300, // 5 minutes
         }
     }
 }
@@ -53,8 +61,12 @@ impl AppConfig {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| AppError::Io(std::io::Error::other(format!("Config serialize failed: {}", e))))?;
+        let content = toml::to_string_pretty(self).map_err(|e| {
+            AppError::Io(std::io::Error::other(format!(
+                "Config serialize failed: {}",
+                e
+            )))
+        })?;
         fs::write(path, content)?;
         Ok(())
     }

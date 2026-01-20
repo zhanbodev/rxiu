@@ -65,7 +65,7 @@ impl NetworkRecovery {
     pub fn detect_wake(&mut self) -> Option<RecoveryReason> {
         let elapsed = self.last_tick.elapsed();
         self.last_tick = Instant::now();
-        
+
         // If elapsed time is much larger than expected heartbeat interval,
         // the system likely just woke from sleep
         if elapsed > self.sleep_threshold {
@@ -78,15 +78,15 @@ impl NetworkRecovery {
             self.zero_peers_since = None;
             self.retry_count = 0;
             self.in_recovery = false;
-            return Some(RecoveryReason::WakeFromSleep { 
-                elapsed_secs: elapsed.as_secs() 
+            return Some(RecoveryReason::WakeFromSleep {
+                elapsed_secs: elapsed.as_secs(),
             });
         }
         None
     }
 
     /// Check if recovery should be triggered based on current peer count.
-    /// 
+    ///
     /// Returns `Some(reason)` if `start_listening()` should be called,
     /// `None` otherwise.
     pub fn should_recover(&mut self, current_peer_count: usize) -> Option<RecoveryReason> {
@@ -114,22 +114,22 @@ impl NetworkRecovery {
             match self.zero_peers_since {
                 Some(since) => {
                     let elapsed = now.duration_since(since);
-                    
+
                     // First trigger: after stale_threshold
                     if !self.in_recovery && elapsed >= self.stale_threshold {
                         self.in_recovery = true;
                         self.retry_count = 1;
                         return Some(RecoveryReason::StaleDetected);
                     }
-                    
+
                     // Subsequent retries
                     if self.in_recovery && self.retry_count < self.max_retries {
-                        let retry_elapsed = self.stale_threshold + 
-                            self.retry_interval * self.retry_count as u32;
+                        let retry_elapsed =
+                            self.stale_threshold + self.retry_interval * self.retry_count as u32;
                         if elapsed >= retry_elapsed {
                             self.retry_count += 1;
-                            return Some(RecoveryReason::Retry { 
-                                attempt: self.retry_count 
+                            return Some(RecoveryReason::Retry {
+                                attempt: self.retry_count,
                             });
                         }
                     }
@@ -208,13 +208,13 @@ mod tests {
     fn test_periodic_refresh_triggers() {
         let mut recovery = NetworkRecovery::new();
         recovery.refresh_interval = Duration::from_millis(50);
-        
+
         // First check - no trigger (just started)
         assert!(recovery.should_recover(0).is_none());
-        
+
         // Wait for refresh interval
         sleep(Duration::from_millis(60));
-        
+
         // Should trigger periodic refresh
         assert!(matches!(
             recovery.should_recover(0),
