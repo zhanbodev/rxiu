@@ -7,9 +7,10 @@ pub mod block_server;
 pub mod client;
 pub mod protocol;
 pub mod proxy;
+pub mod renew;
 pub mod rs_sync;
 pub mod server;
 
 pub use client::DaemonClient;
-pub use protocol::{DaemonRequest, DaemonResponse, DAEMON_PORT};
+pub use protocol::{DAEMON_PORT, DaemonRequest, DaemonResponse};
 pub use proxy::P2PProxy;

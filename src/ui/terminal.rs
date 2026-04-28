@@ -5,9 +5,8 @@
 use std::io::{self, Write};
 
 use crossterm::{
-    cursor,
+    ExecutableCommand, cursor,
     terminal::{self, ClearType},
-    ExecutableCommand,
 };
 
 use crate::error::Result;

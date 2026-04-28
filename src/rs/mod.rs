@@ -142,7 +142,14 @@ impl RsStore {
         Ok(fs::read(path)?)
     }
 
-    pub fn put_file_from_path(&self, src: &Path, target_name: &str, members: Vec<String>, algo: &str, block_size: u64) -> Result<RsFileEntry> {
+    pub fn put_file_from_path(
+        &self,
+        src: &Path,
+        target_name: &str,
+        members: Vec<String>,
+        algo: &str,
+        block_size: u64,
+    ) -> Result<RsFileEntry> {
         if !src.exists() {
             return Err(AppError::PathNotFound(src.to_path_buf()));
         }
@@ -277,7 +284,11 @@ impl RsStore {
         Ok(())
     }
 
-    fn cleanup_blocks(&self, remaining: &[RsFileEntry], removed_blocks: &[RsBlockEntry]) -> Result<()> {
+    fn cleanup_blocks(
+        &self,
+        remaining: &[RsFileEntry],
+        removed_blocks: &[RsBlockEntry],
+    ) -> Result<()> {
         let mut referenced: HashSet<String> = HashSet::new();
         for file in remaining {
             for block in &file.blocks {

@@ -87,7 +87,7 @@ mod tests {
             peer_id: "12D3KooWTest".to_string(),
             addrs: vec!["/ip4/127.0.0.1/tcp/1234".to_string()],
         };
-        
+
         assert!(entry.parse_first_addr().is_some());
     }
 }

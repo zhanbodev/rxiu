@@ -2491,6 +2491,8 @@ dependencies = [
  "libc",
  "libp2p",
  "ratatui",
+ "scopeguard",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

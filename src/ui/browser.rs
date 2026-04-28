@@ -8,11 +8,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crossterm::{
-    cursor,
+    ExecutableCommand, QueueableCommand, cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style::{self, Stylize},
     terminal::{self, ClearType},
-    ExecutableCommand, QueueableCommand,
 };
 
 use super::terminal::RawModeGuard;
@@ -273,7 +272,13 @@ impl FileBrowser {
         let end = (start + visible_rows).min(self.entries.len());
 
         // Entries
-        for (i, entry) in self.entries.iter().enumerate().skip(start).take(end - start) {
+        for (i, entry) in self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(end - start)
+        {
             let is_selected = i == self.selected;
 
             // Selection indicator
@@ -325,10 +330,14 @@ impl FileBrowser {
 
     /// Get browser state for external rendering (TUI mode).
     pub fn get_state(&self) -> (&PathBuf, Vec<BrowserEntry>, usize) {
-        let entries: Vec<BrowserEntry> = self.entries.iter().map(|e| BrowserEntry {
-            name: e.name.clone(),
-            is_dir: e.is_dir,
-        }).collect();
+        let entries: Vec<BrowserEntry> = self
+            .entries
+            .iter()
+            .map(|e| BrowserEntry {
+                name: e.name.clone(),
+                is_dir: e.is_dir,
+            })
+            .collect();
         (&self.current_dir, entries, self.selected)
     }
 
@@ -356,4 +365,3 @@ enum BrowserAction {
     Select(PathBuf),
     Cancel,
 }
-

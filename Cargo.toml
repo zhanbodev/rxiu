@@ -2,6 +2,7 @@
 name = "rxiu"
 version = "0.3.0"
 edition = "2024"
+build = "build.rs"
 
 [[bin]]
 name = "rxiu"
@@ -29,6 +30,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 toml = "0.8"
+semver = "1.0"
+scopeguard = "1.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -45,3 +48,6 @@ features = [
     "macros",
     "cbor",
 ]
+
+[build-dependencies]
+chrono = "0.4"

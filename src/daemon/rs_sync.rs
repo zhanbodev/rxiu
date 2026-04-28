@@ -4,14 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 
 use crate::config::AppConfig;
 use crate::daemon::protocol::RsSyncStatus;
 use crate::error::{AppError, Result};
 use crate::p2p::service::P2PService;
-use crate::rs::sync::{entry_members, hrw_owner_index, needs_sync};
 use crate::rs::RsStore;
+use crate::rs::sync::{entry_members, is_block_assigned_to, needs_sync};
 
 #[derive(Debug)]
 struct RsSyncState {
@@ -34,7 +34,7 @@ impl RsSyncManager {
             in_progress: false,
             last_updated_files: 0,
             last_error: None,
-                    config,
+            config,
         }));
         let (trigger_tx, mut trigger_rx) = mpsc::channel::<()>(4);
         let state_clone = state.clone();
@@ -110,7 +110,8 @@ async fn run_sync_if_needed(
     }
 
     let result = if force {
-        sync_rs_missing_blocks(p2p, rs_store, concurrency).await
+        let rf = { state.lock().await.config.rs_replication_factor };
+        sync_rs_missing_blocks(p2p, rs_store, concurrency, rf).await
     } else {
         let peers = p2p.get_peers().await;
         let local_id = p2p.local_peer_id().to_string();
@@ -120,11 +121,12 @@ async fn run_sync_if_needed(
         if members.is_empty() {
             Ok(0)
         } else {
+            let rf = { state.lock().await.config.rs_replication_factor };
             let store = rs_store.read().await;
-            let needs = needs_sync(&store, &local_id, &members)?;
+            let needs = needs_sync(&store, &local_id, &members, rf)?;
             drop(store);
             if needs {
-                sync_rs_missing_blocks(p2p, rs_store, concurrency).await
+                sync_rs_missing_blocks(p2p, rs_store, concurrency, rf).await
             } else {
                 Ok(0)
             }
@@ -148,6 +150,7 @@ async fn sync_rs_missing_blocks(
     p2p: &P2PService,
     rs_store: &Arc<RwLock<RsStore>>,
     concurrency: usize,
+    replication_factor: usize,
 ) -> Result<usize> {
     let peers = p2p.get_peers().await;
     if peers.is_empty() {
@@ -181,14 +184,14 @@ async fn sync_rs_missing_blocks(
         let owned_blocks = entry
             .blocks
             .iter()
-            .filter(|b| hrw_owner_index(b, &members) == Some(local_index))
+            .filter(|b| is_block_assigned_to(b, &members, local_index, replication_factor))
             .count();
         let missing: Vec<_> = {
             let store = rs_store.read().await;
             entry
                 .blocks
                 .iter()
-                .filter(|b| hrw_owner_index(b, &members) == Some(local_index))
+                .filter(|b| is_block_assigned_to(b, &members, local_index, replication_factor))
                 .filter(|b| !store.has_block(&b.hash))
                 .cloned()
                 .collect()
@@ -210,14 +213,16 @@ async fn sync_rs_missing_blocks(
             let p2p = p2p.clone();
             let peers = peer_ids.clone();
             let rs_store = rs_store.clone();
+            let block_hash = block.hash.clone();
             tasks.push(async move {
-                let _permit = sem.acquire().await.map_err(|_| {
-                    AppError::Io(std::io::Error::other("RS sync semaphore closed"))
-                })?;
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| (block_hash.clone(), AppError::Io(std::io::Error::other("RS sync semaphore closed"))))?;
                 if peers.is_empty() {
-                    return Err(AppError::Io(std::io::Error::other(
+                    return Err((block_hash, AppError::Io(std::io::Error::other(
                         "No peers available for RS sync",
-                    )));
+                    ))));
                 }
                 let mut fetched = None;
                 for cycle in 0..3 {
@@ -234,21 +239,32 @@ async fn sync_rs_missing_blocks(
                     tokio::time::sleep(Duration::from_millis(200 * (cycle + 1))).await;
                 }
                 let block_data = fetched.ok_or_else(|| {
-                    AppError::Io(std::io::Error::other("Failed to fetch RS block"))
+                    (block_hash.clone(), AppError::Io(std::io::Error::other("Failed to fetch RS block")))
                 })?;
-                rs_store.read().await.verify_and_write_block(&block.hash, &block_data.data)?;
-                Ok::<(), AppError>(())
+                rs_store
+                    .read()
+                    .await
+                    .verify_and_write_block(&block.hash, &block_data.data)
+                    .map_err(|e| (block_hash.clone(), e))?;
+                Ok::<_, (String, AppError)>(())
             });
         }
+        let mut failed_blocks = 0usize;
         while let Some(result) = tasks.next().await {
-            result?;
+            if let Err((hash, e)) = result {
+                tracing::warn!("[RsSync] Block {} failed: {}", &hash[..8.min(hash.len())], e);
+                failed_blocks += 1;
+            }
+        }
+        if failed_blocks > 0 {
+            tracing::warn!("[RsSync] {} blocks failed for file '{}'", failed_blocks, entry.name);
         }
         let all_have = {
             let store = rs_store.read().await;
             entry
                 .blocks
                 .iter()
-                .filter(|b| hrw_owner_index(b, &members) == Some(local_index))
+                .filter(|b| is_block_assigned_to(b, &members, local_index, replication_factor))
                 .all(|b| store.has_block(&b.hash))
         };
         entry.complete = owned_blocks > 0 && all_have;

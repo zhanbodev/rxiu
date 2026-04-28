@@ -117,6 +117,26 @@ REMOTE CONNECTION STATUS
 说明:
 - `gsyn=1`: 守护进程后台持续同步，即使关闭 TUI 也会继续。
 - `gsyn=0`: 守护进程不自动同步，进入 RS 模式时由 TUI 触发同步。
+- `rspeers`: 触发 LAN 节点刷新并显示节点列表，用于恢复休眠后的节点连接。
+
+## 配置文件
+
+配置文件位置: `~/.rxiu/config/config.toml`
+
+```toml
+rs_concurrency = 8           # 下载并发数
+rs_sync_concurrency = 4      # 同步并发数
+rs_block_size_mb = 16        # 块大小（MB）
+rs_global_sync = true        # 全局同步开关
+rs_replication_factor = 2    # 副本因子（每块存储在 N 个节点）
+```
+
+**说明**:
+- 配置文件修改后 **2 秒内自动生效**，无需重启
+- `rs_replication_factor`: 设置每个块存储在多少个节点上
+  - `1` = 无冗余（原始行为）
+  - `2` = 每块存 2 份（推荐，可容忍 1 个节点离线）
+  - `N` = 每块存 N 份
 
 ## 其他命令
 

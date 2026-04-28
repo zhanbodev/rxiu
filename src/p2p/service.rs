@@ -5,11 +5,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use libp2p::{request_response, PeerId};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use libp2p::{PeerId, request_response};
+use tokio::sync::{RwLock, mpsc, oneshot};
 
+use super::messages::{
+    FILE_CHUNK_SIZE, FileChunk, FileMeta, FileRequest, FileResponse, RsBlock, RsHave,
+};
 use super::node::{NodeEvent, P2PNode, PeerInfo};
-use super::messages::{FileChunk, FileMeta, FileRequest, FileResponse, RsBlock, RsHave, FILE_CHUNK_SIZE};
 use crate::error::AppError;
 use crate::rs::{RsFileEntry, RsStore};
 use crate::storage::ZoneManager;
@@ -18,26 +20,28 @@ use crate::storage::ZoneManager;
 #[derive(Debug)]
 pub enum ServiceCommand {
     /// Get list of peers.
-    GetPeers { resp: oneshot::Sender<Vec<PeerInfo>> },
+    GetPeers {
+        resp: oneshot::Sender<Vec<PeerInfo>>,
+    },
     /// Get peer count.
     GetPeerCount { resp: oneshot::Sender<usize> },
     /// List zones on a remote peer.
-    ListRemoteZones { 
-        peer_id: PeerId, 
-        resp: oneshot::Sender<crate::Result<Vec<String>>> 
+    ListRemoteZones {
+        peer_id: PeerId,
+        resp: oneshot::Sender<crate::Result<Vec<String>>>,
     },
     /// List files in a remote zone.
-    ListRemoteFiles { 
-        peer_id: PeerId, 
+    ListRemoteFiles {
+        peer_id: PeerId,
         zone: String,
-        resp: oneshot::Sender<crate::Result<Vec<crate::storage::FileMetadata>>> 
+        resp: oneshot::Sender<crate::Result<Vec<crate::storage::FileMetadata>>>,
     },
     /// Fetch a file from a remote peer.
-    FetchFile { 
-        peer_id: PeerId, 
-        zone: String, 
+    FetchFile {
+        peer_id: PeerId,
+        zone: String,
         name: String,
-        resp: oneshot::Sender<crate::Result<(Vec<u8>, String)>>
+        resp: oneshot::Sender<crate::Result<(Vec<u8>, String)>>,
     },
     /// Fetch file metadata from a remote peer.
     GetFileMeta {
@@ -61,10 +65,7 @@ pub enum ServiceCommand {
         resp: oneshot::Sender<crate::Result<Vec<RsFileEntry>>>,
     },
     /// RS: announce a file to a peer.
-    RsAnnounce {
-        peer_id: PeerId,
-        file: RsFileEntry,
-    },
+    RsAnnounce { peer_id: PeerId, file: RsFileEntry },
     /// RS: get file metadata.
     RsGetMeta {
         peer_id: PeerId,
@@ -90,13 +91,22 @@ pub enum ServiceCommand {
         resp: oneshot::Sender<crate::Result<RsHave>>,
     },
     /// RS: delete a file on a peer.
-    RsDelete {
-        peer_id: PeerId,
-        name: String,
-    },
+    RsDelete { peer_id: PeerId, name: String },
     /// Refresh LAN peers (trigger network recovery).
     RefreshPeers {
         resp: oneshot::Sender<crate::Result<usize>>,
+    },
+    /// Renew: get version from a peer.
+    RenewGetVersion {
+        peer_id: PeerId,
+        resp: oneshot::Sender<crate::Result<crate::renew::VersionInfo>>,
+    },
+    /// Renew: get binary chunk from a peer.
+    RenewGetBinaryChunk {
+        peer_id: PeerId,
+        offset: u64,
+        length: u32,
+        resp: oneshot::Sender<crate::Result<(Vec<u8>, bool)>>,
     },
 }
 
@@ -126,34 +136,108 @@ impl P2PService {
         // Spawn the event loop
         tokio::spawn(async move {
             #[allow(clippy::type_complexity)]
-            let mut pending_zone_requests: HashMap<PeerId, oneshot::Sender<crate::Result<Vec<String>>>> = HashMap::new();
+            let mut pending_zone_requests: HashMap<
+                PeerId,
+                oneshot::Sender<crate::Result<Vec<String>>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_file_list_requests: HashMap<PeerId, oneshot::Sender<crate::Result<Vec<crate::storage::FileMetadata>>>> = HashMap::new();
+            let mut pending_file_list_requests: HashMap<
+                PeerId,
+                oneshot::Sender<crate::Result<Vec<crate::storage::FileMetadata>>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_file_requests: HashMap<String, oneshot::Sender<crate::Result<(Vec<u8>, String)>>> = HashMap::new();
+            let mut pending_file_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<(Vec<u8>, String)>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_file_meta_requests: HashMap<String, oneshot::Sender<crate::Result<FileMeta>>> = HashMap::new();
+            let mut pending_file_meta_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<FileMeta>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_file_chunk_requests: HashMap<String, oneshot::Sender<crate::Result<FileChunk>>> = HashMap::new();
+            let mut pending_file_chunk_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<FileChunk>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_rs_list_requests: HashMap<PeerId, oneshot::Sender<crate::Result<Vec<RsFileEntry>>>> = HashMap::new();
+            let mut pending_rs_list_requests: HashMap<
+                PeerId,
+                oneshot::Sender<crate::Result<Vec<RsFileEntry>>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_rs_meta_requests: HashMap<String, oneshot::Sender<crate::Result<RsFileEntry>>> = HashMap::new();
+            let mut pending_rs_meta_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<RsFileEntry>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_rs_block_requests: HashMap<String, oneshot::Sender<crate::Result<RsBlock>>> = HashMap::new();
-            let mut pending_rs_block_ids: HashMap<request_response::OutboundRequestId, String> = HashMap::new();
-            let mut pending_rs_blocks_requests: HashMap<request_response::OutboundRequestId, oneshot::Sender<crate::Result<Vec<RsBlock>>>> = HashMap::new();
+            let mut pending_rs_block_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<RsBlock>>,
+            > = HashMap::new();
+            let mut pending_rs_block_ids: HashMap<request_response::OutboundRequestId, String> =
+                HashMap::new();
+            let mut pending_rs_blocks_requests: HashMap<
+                request_response::OutboundRequestId,
+                oneshot::Sender<crate::Result<Vec<RsBlock>>>,
+            > = HashMap::new();
             #[allow(clippy::type_complexity)]
-            let mut pending_rs_have_requests: HashMap<String, oneshot::Sender<crate::Result<RsHave>>> = HashMap::new();
-            let mut pending_rs_have_ids: HashMap<request_response::OutboundRequestId, String> = HashMap::new();
-            
+            let mut pending_rs_have_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<RsHave>>,
+            > = HashMap::new();
+            let mut pending_rs_have_ids: HashMap<request_response::OutboundRequestId, String> =
+                HashMap::new();
+
+            // Renew request tracking
+            let mut pending_renew_version_requests: HashMap<
+                PeerId,
+                oneshot::Sender<crate::Result<crate::renew::VersionInfo>>,
+            > = HashMap::new();
+            let mut pending_renew_chunk_requests: HashMap<
+                String,
+                oneshot::Sender<crate::Result<(Vec<u8>, bool)>>,
+            > = HashMap::new();
+
             // Heartbeat tracking: peer_id -> missed ping count
             let mut peer_heartbeat_misses: HashMap<PeerId, u8> = HashMap::new();
-            let mut pending_pings: std::collections::HashSet<PeerId> = std::collections::HashSet::new();
+            let mut pending_pings: std::collections::HashSet<PeerId> =
+                std::collections::HashSet::new();
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(5));
-            
+
+            // Periodic reconnection to persisted peers (every 30 seconds for faster recovery)
+            let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+
             // Network recovery for wake from sleep scenarios
             let mut network_recovery = super::recovery::NetworkRecovery::new();
+
+            // Load persisted peers and try to reconnect
+            if let Ok(persisted_peers) = super::peer_store::load_peers() {
+                let count = persisted_peers.len();
+                if count > 0 {
+                    tracing::info!("[PeerStore] Loading {} persisted peers", count);
+                    for p in persisted_peers {
+                        if let Ok(peer_id) = p.peer_id.parse::<PeerId>() {
+                            // Skip self
+                            if peer_id == node.local_peer_id() {
+                                continue;
+                            }
+                            // Try to dial first valid address
+                            for addr_str in &p.addrs {
+                                if let Ok(addr) = addr_str.parse() {
+                                    tracing::info!(
+                                        "[PeerStore] Dialing persisted peer {} at {}",
+                                        peer_id,
+                                        addr_str
+                                    );
+                                    node.dial_peer(peer_id, addr);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             loop {
                 tokio::select! {
@@ -165,8 +249,36 @@ impl P2PService {
                             if let Err(e) = node.start_listening() {
                                 tracing::error!("[NetworkRecovery] Failed to restart listener: {}", e);
                             }
+                            // Also probe all known peers to trigger peer exchange
+                            let probed = node.probe_all_peers();
+                            tracing::info!("[NetworkRecovery] Probed {} peers for peer exchange", probed);
+                            
+                            // CRITICAL: Immediately dial ALL persisted peers after wake
+                            // This ensures we reconnect to peers whose mDNS might not be visible yet
+                            if let Ok(persisted_peers) = super::peer_store::load_peers() {
+                                let local_id = node.local_peer_id();
+                                let mut dialed = 0;
+                                for p in persisted_peers {
+                                    if let Ok(peer_id) = p.peer_id.parse::<PeerId>() {
+                                        if peer_id == local_id {
+                                            continue;
+                                        }
+                                        for addr_str in &p.addrs {
+                                            if let Ok(addr) = addr_str.parse() {
+                                                tracing::info!("[WakeRecovery] Dialing persisted peer {} at {}", peer_id, addr_str);
+                                                node.dial_peer(peer_id, addr);
+                                                dialed += 1;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if dialed > 0 {
+                                    tracing::info!("[WakeRecovery] Dialed {} persisted peers", dialed);
+                                }
+                            }
                         }
-                        
+
                         // Check for peers that didn't respond to previous ping
                         for peer_id in pending_pings.drain() {
                             let misses = peer_heartbeat_misses.entry(peer_id).or_insert(0);
@@ -178,19 +290,49 @@ impl P2PService {
                                 peer_heartbeat_misses.remove(&peer_id);
                             }
                         }
-                        
+
                         // Send ping to all known peers
                         let current_peer_count = node.peer_count();
                         for peer in node.get_peers() {
                             node.send_request(peer.peer_id, FileRequest::Ping);
                             pending_pings.insert(peer.peer_id);
                         }
-                        
+
                         // Check if network recovery is needed (other strategies)
                         if let Some(reason) = network_recovery.should_recover(current_peer_count) {
                             tracing::info!("[NetworkRecovery] Triggering recovery: {}", reason);
                             if let Err(e) = node.start_listening() {
                                 tracing::error!("[NetworkRecovery] Failed to restart listener: {}", e);
+                            }
+                        }
+                    }
+                    // Periodic reconnection to persisted peers
+                    _ = reconnect_interval.tick() => {
+                        if let Ok(persisted_peers) = super::peer_store::load_peers() {
+                            let known_peer_ids: std::collections::HashSet<PeerId> =
+                                node.get_peers().iter().map(|p| p.peer_id).collect();
+                            let local_id = node.local_peer_id();
+
+                            let mut reconnected = 0;
+                            for p in persisted_peers {
+                                if let Ok(peer_id) = p.peer_id.parse::<PeerId>() {
+                                    // Skip self and already connected peers
+                                    if peer_id == local_id || known_peer_ids.contains(&peer_id) {
+                                        continue;
+                                    }
+                                    // Try to dial first valid address
+                                    for addr_str in &p.addrs {
+                                        if let Ok(addr) = addr_str.parse() {
+                                            tracing::info!("[PeerStore] Reconnecting to {} at {}", peer_id, addr_str);
+                                            node.dial_peer(peer_id, addr);
+                                            reconnected += 1;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if reconnected > 0 {
+                                tracing::info!("[PeerStore] Attempted reconnection to {} offline peers", reconnected);
                             }
                         }
                     }
@@ -216,19 +358,19 @@ impl P2PService {
                             }
                             ServiceCommand::FetchFile { peer_id, zone, name, resp } => {
                                 let key = format!("{}:{}", zone, name);
-                                tracing::info!("[P2P] Sending GetFile({}/{}) to {}, key={}", zone, name, peer_id, key);
+                                tracing::debug!("[P2P] Sending GetFile({}/{}) to {}", zone, name, peer_id);
                                 node.send_request(peer_id, FileRequest::GetFile { zone, name: name.clone() });
                                 pending_file_requests.insert(key, resp);
                             }
                             ServiceCommand::GetFileMeta { peer_id, zone, name, resp } => {
                                 let key = format!("{}:{}", zone, name);
-                                tracing::info!("[P2P] Sending GetFileMeta({}/{}) to {}, key={}", zone, name, peer_id, key);
+                                tracing::debug!("[P2P] Sending GetFileMeta({}/{}) to {}", zone, name, peer_id);
                                 node.send_request(peer_id, FileRequest::GetFileMeta { zone, name: name.clone() });
                                 pending_file_meta_requests.insert(key, resp);
                             }
                             ServiceCommand::GetFileChunk { peer_id, zone, name, offset, size, resp } => {
                                 let key = format!("{}:{}:{}", zone, name, offset);
-                                tracing::info!("[P2P] Sending GetFileChunk({}/{}, offset={}, size={}) to {}, key={}", zone, name, offset, size, peer_id, key);
+                                tracing::debug!("[P2P] Sending GetFileChunk({}/{}, offset={}) to {}", zone, name, offset, peer_id);
                                 node.send_request(peer_id, FileRequest::GetFileChunk { zone, name: name.clone(), offset, size });
                                 pending_file_chunk_requests.insert(key, resp);
                             }
@@ -247,13 +389,13 @@ impl P2PService {
                                 pending_rs_meta_requests.insert(name, resp);
                             }
                             ServiceCommand::RsGetBlock { peer_id, hash, resp } => {
-                                tracing::info!("[P2P] Sending RsGetBlock({}) to {}", hash, peer_id);
+                                tracing::debug!("[P2P] Sending RsGetBlock({}...) to {}", &hash[..8.min(hash.len())], peer_id);
                                 let request_id = node.send_request(peer_id, FileRequest::RsGetBlock { hash: hash.clone() });
                                 pending_rs_block_ids.insert(request_id, hash.clone());
                                 pending_rs_block_requests.insert(hash, resp);
                             }
                             ServiceCommand::RsGetBlocks { peer_id, hashes, resp } => {
-                                tracing::info!("[P2P] Sending RsGetBlocks({}) to {}", hashes.len(), peer_id);
+                                tracing::debug!("[P2P] Sending RsGetBlocks({}) to {}", hashes.len(), peer_id);
                                 let request_id = node.send_request(peer_id, FileRequest::RsGetBlocks { hashes });
                                 pending_rs_blocks_requests.insert(request_id, resp);
                             }
@@ -270,15 +412,28 @@ impl P2PService {
                             }
                             ServiceCommand::RefreshPeers { resp } => {
                                 tracing::info!("[P2P] Manual peer refresh triggered");
-                                // Restart listener to trigger mDNS rediscovery
+                                // 1. Restart listener to trigger mDNS rediscovery
                                 if let Err(e) = node.start_listening() {
                                     tracing::error!("[P2P] Failed to restart listener: {}", e);
-                                    let _ = resp.send(Err(AppError::Io(std::io::Error::other(e.to_string()))));
-                                } else {
-                                    // Return current peer count
-                                    let count = node.peer_count();
-                                    let _ = resp.send(Ok(count));
                                 }
+                                // 2. Probe all known peers to trigger peer exchange
+                                // This helps us rediscover the network even if mDNS is slow
+                                let probed = node.probe_all_peers();
+                                tracing::info!("[P2P] Probed {} known peers for peer exchange", probed);
+                                // Return current peer count
+                                let count = node.peer_count();
+                                let _ = resp.send(Ok(count));
+                            }
+                            ServiceCommand::RenewGetVersion { peer_id, resp } => {
+                                tracing::debug!("[Renew] Sending GetVersion to {}", peer_id);
+                                node.send_request(peer_id, FileRequest::RenewGetVersion);
+                                pending_renew_version_requests.insert(peer_id, resp);
+                            }
+                            ServiceCommand::RenewGetBinaryChunk { peer_id, offset, length, resp } => {
+                                tracing::debug!("[Renew] Sending GetBinaryChunk to {} (offset={}, length={})", peer_id, offset, length);
+                                let key = format!("{}:{}", peer_id, offset);
+                                node.send_request(peer_id, FileRequest::RenewGetBinaryChunk { offset, length });
+                                pending_renew_chunk_requests.insert(key, resp);
                             }
                         }
                     }
@@ -292,6 +447,11 @@ impl P2PService {
                                 peer_heartbeat_misses.remove(&info.peer_id);
                                 // Request peer list for peer exchange
                                 node.send_request(info.peer_id, FileRequest::GetPeers);
+                                // Persist peer for later reconnection
+                                let addrs: Vec<String> = info.addrs.iter().map(|a| a.to_string()).collect();
+                                if let Err(e) = super::peer_store::save_peer(&info.peer_id.to_string(), &addrs) {
+                                    tracing::warn!("[PeerStore] Failed to save peer: {}", e);
+                                }
                             }
                             NodeEvent::PeerExpired(peer_id) => {
                                 tracing::info!("Peer expired: {}", peer_id);
@@ -322,7 +482,7 @@ impl P2PService {
                                     node.send_response(channel, FileResponse::Peers(peer_entries));
                                 } else {
                                     let response = handle_incoming_request(&zone_manager, &rs_store, request).await;
-                                    tracing::info!("Responding to request from {}: {:?}", peer_id, response);
+                                    tracing::debug!("Responding to request from {}", peer_id);
                                     node.send_response(channel, response);
                                 }
                             }
@@ -337,15 +497,15 @@ impl P2PService {
                                 }
                             }
                             NodeEvent::FileReceived { name, content, hash } => {
-                                tracing::info!("[P2P] FileReceived: {} ({} bytes), looking for match", name, content.len());
+                                tracing::debug!("[P2P] FileReceived: {} ({} bytes)", name, content.len());
                                 // Find matching request by name suffix
                                 let pending_keys: Vec<String> = pending_file_requests.keys().cloned().collect();
-                                tracing::info!("[P2P] Pending keys: {:?}", pending_keys);
+                                tracing::trace!("[P2P] Pending keys: {:?}", pending_keys);
                                 let key = pending_file_requests.keys()
                                     .find(|k| k.ends_with(&format!(":{}", name)))
                                     .cloned();
                                 if let Some(key) = key {
-                                    tracing::info!("[P2P] Matched key: {}", key);
+                                    tracing::debug!("[P2P] Matched key: {}", key);
                                     if let Some(resp) = pending_file_requests.remove(&key) {
                                         let _ = resp.send(Ok((content, hash)));
                                     }
@@ -404,6 +564,17 @@ impl P2PService {
                                             node.dial_peer(peer_id, addr);
                                         }
                                     }
+                                }
+                            }
+                            NodeEvent::RenewVersionReceived { peer_id, version } => {
+                                if let Some(resp) = pending_renew_version_requests.remove(&peer_id) {
+                                    let _ = resp.send(Ok(version));
+                                }
+                            }
+                            NodeEvent::RenewChunkReceived { peer_id, offset, data, is_last } => {
+                                let key = format!("{}:{}", peer_id, offset);
+                                if let Some(resp) = pending_renew_chunk_requests.remove(&key) {
+                                    let _ = resp.send(Ok((data, is_last)));
                                 }
                             }
                             NodeEvent::ResponseError { request_id, message } => {
@@ -471,7 +642,10 @@ impl P2PService {
     /// Get discovered peers.
     pub async fn get_peers(&self) -> Vec<PeerInfo> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.cmd_tx.send(ServiceCommand::GetPeers { resp: tx }).await;
+        let _ = self
+            .cmd_tx
+            .send(ServiceCommand::GetPeers { resp: tx })
+            .await;
         rx.await.unwrap_or_default()
     }
 
@@ -482,70 +656,109 @@ impl P2PService {
     /// Get peer count.
     pub async fn peer_count(&self) -> usize {
         let (tx, rx) = oneshot::channel();
-        let _ = self.cmd_tx.send(ServiceCommand::GetPeerCount { resp: tx }).await;
+        let _ = self
+            .cmd_tx
+            .send(ServiceCommand::GetPeerCount { resp: tx })
+            .await;
         rx.await.unwrap_or(0)
     }
 
     /// List zones on a remote peer (with 10s timeout).
     pub async fn list_remote_zones(&self, peer_id: PeerId) -> crate::Result<Vec<String>> {
         let (tx, rx) = oneshot::channel();
-        self.cmd_tx.send(ServiceCommand::ListRemoteZones { peer_id, resp: tx })
+        self.cmd_tx
+            .send(ServiceCommand::ListRemoteZones { peer_id, resp: tx })
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
-        
+
         // Add timeout
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
-            Err(_) => Err(AppError::Io(std::io::Error::other("Request timed out (peer may be offline)"))),
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Request timed out (peer may be offline)",
+            ))),
         }
     }
 
     /// List files in a remote zone (with 10s timeout).
-    pub async fn list_remote_files(&self, peer_id: PeerId, zone: &str) -> crate::Result<Vec<crate::storage::FileMetadata>> {
+    pub async fn list_remote_files(
+        &self,
+        peer_id: PeerId,
+        zone: &str,
+    ) -> crate::Result<Vec<crate::storage::FileMetadata>> {
         let (tx, rx) = oneshot::channel();
-        self.cmd_tx.send(ServiceCommand::ListRemoteFiles { 
-            peer_id, 
-            zone: zone.to_string(), 
-            resp: tx 
-        }).await.map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
-        
+        self.cmd_tx
+            .send(ServiceCommand::ListRemoteFiles {
+                peer_id,
+                zone: zone.to_string(),
+                resp: tx,
+            })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+
         // Add timeout
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
-            Err(_) => Err(AppError::Io(std::io::Error::other("Request timed out (peer may be offline)"))),
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Request timed out (peer may be offline)",
+            ))),
         }
     }
 
     /// Fetch a file from a remote peer (with 60s timeout for large files).
-    pub async fn fetch_file(&self, peer_id: PeerId, zone: &str, name: &str) -> crate::Result<(Vec<u8>, String)> {
+    pub async fn fetch_file(
+        &self,
+        peer_id: PeerId,
+        zone: &str,
+        name: &str,
+    ) -> crate::Result<(Vec<u8>, String)> {
         let (tx, rx) = oneshot::channel();
-        self.cmd_tx.send(ServiceCommand::FetchFile { 
-            peer_id, 
-            zone: zone.to_string(), 
-            name: name.to_string(),
-            resp: tx 
-        }).await.map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
-        
+        self.cmd_tx
+            .send(ServiceCommand::FetchFile {
+                peer_id,
+                zone: zone.to_string(),
+                name: name.to_string(),
+                resp: tx,
+            })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+
         // Longer timeout for file downloads
         match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
-            Err(_) => Err(AppError::Io(std::io::Error::other("Download timed out (5 minutes)"))),
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Download timed out (5 minutes)",
+            ))),
         }
     }
 
     /// Fetch file metadata from a remote peer.
-    pub async fn get_file_meta(&self, peer_id: PeerId, zone: &str, name: &str) -> crate::Result<FileMeta> {
+    pub async fn get_file_meta(
+        &self,
+        peer_id: PeerId,
+        zone: &str,
+        name: &str,
+    ) -> crate::Result<FileMeta> {
         let (tx, rx) = oneshot::channel();
-        self.cmd_tx.send(ServiceCommand::GetFileMeta {
-            peer_id,
-            zone: zone.to_string(),
-            name: name.to_string(),
-            resp: tx,
-        }).await.map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+        self.cmd_tx
+            .send(ServiceCommand::GetFileMeta {
+                peer_id,
+                zone: zone.to_string(),
+                name: name.to_string(),
+                resp: tx,
+            })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
 
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
-            Err(_) => Err(AppError::Io(std::io::Error::other("Request timed out (peer may be offline)"))),
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Request timed out (peer may be offline)",
+            ))),
         }
     }
 
@@ -559,18 +772,24 @@ impl P2PService {
         size: u64,
     ) -> crate::Result<FileChunk> {
         let (tx, rx) = oneshot::channel();
-        self.cmd_tx.send(ServiceCommand::GetFileChunk {
-            peer_id,
-            zone: zone.to_string(),
-            name: name.to_string(),
-            offset,
-            size,
-            resp: tx,
-        }).await.map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+        self.cmd_tx
+            .send(ServiceCommand::GetFileChunk {
+                peer_id,
+                zone: zone.to_string(),
+                name: name.to_string(),
+                offset,
+                size,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
 
         match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
-            Err(_) => Err(AppError::Io(std::io::Error::other("Chunk request timed out"))),
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Chunk request timed out",
+            ))),
         }
     }
 
@@ -583,7 +802,8 @@ impl P2PService {
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
 
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("RS list timed out"))),
         }
     }
@@ -609,13 +829,18 @@ impl P2PService {
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("RS meta timed out"))),
         }
     }
 
     /// RS: get multiple blocks by hash from a peer.
-    pub async fn rs_get_blocks(&self, peer_id: PeerId, hashes: Vec<String>) -> crate::Result<Vec<RsBlock>> {
+    pub async fn rs_get_blocks(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<String>,
+    ) -> crate::Result<Vec<RsBlock>> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
             .send(ServiceCommand::RsGetBlocks {
@@ -626,7 +851,8 @@ impl P2PService {
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
         match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("RS blocks timed out"))),
         }
     }
@@ -643,7 +869,8 @@ impl P2PService {
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
         match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("RS block timed out"))),
         }
     }
@@ -660,7 +887,8 @@ impl P2PService {
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("RS have timed out"))),
         }
     }
@@ -685,8 +913,54 @@ impl P2PService {
             .await
             .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
         match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-            Ok(result) => result.map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
             Err(_) => Err(AppError::Io(std::io::Error::other("Refresh timed out"))),
+        }
+    }
+
+    /// Renew: get version info from a peer.
+    pub async fn renew_get_version(
+        &self,
+        peer_id: PeerId,
+    ) -> crate::Result<crate::renew::VersionInfo> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(ServiceCommand::RenewGetVersion { peer_id, resp: tx })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Renew version timed out",
+            ))),
+        }
+    }
+
+    /// Renew: get a binary chunk from a peer.
+    pub async fn renew_get_binary_chunk(
+        &self,
+        peer_id: PeerId,
+        offset: u64,
+        length: u32,
+    ) -> crate::Result<(Vec<u8>, bool)> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(ServiceCommand::RenewGetBinaryChunk {
+                peer_id,
+                offset,
+                length,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| AppError::Io(std::io::Error::other("Channel closed")))?;
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(result) => result
+                .map_err(|_| AppError::Io(std::io::Error::other("Response channel closed")))?,
+            Err(_) => Err(AppError::Io(std::io::Error::other(
+                "Renew binary chunk timed out",
+            ))),
         }
     }
 
@@ -712,12 +986,10 @@ async fn handle_incoming_request(
             let manager = zone_manager.read().await;
             // Try to get the zone and list files
             match manager.get_zone(&zone) {
-                Some(z) => {
-                    match z.list() {
-                        Ok(files) => FileResponse::Files { zone, files },
-                        Err(e) => FileResponse::Error(format!("Failed to list files: {}", e)),
-                    }
-                }
+                Some(z) => match z.list() {
+                    Ok(files) => FileResponse::Files { zone, files },
+                    Err(e) => FileResponse::Error(format!("Failed to list files: {}", e)),
+                },
                 None => FileResponse::Error(format!("Zone '{}' not found", zone)),
             }
         }
@@ -728,12 +1000,16 @@ async fn handle_incoming_request(
                     match z.retrieve(&name) {
                         Ok(content) => {
                             // Compute hash
-                            use sha2::{Sha256, Digest};
+                            use sha2::{Digest, Sha256};
                             let mut hasher = Sha256::new();
                             hasher.update(&content);
                             let hash = format!("{:x}", hasher.finalize());
-                            
-                            FileResponse::FileData { name, content, hash }
+
+                            FileResponse::FileData {
+                                name,
+                                content,
+                                hash,
+                            }
                         }
                         Err(e) => FileResponse::Error(format!("Failed to get file: {}", e)),
                     }
@@ -768,7 +1044,12 @@ async fn handle_incoming_request(
                 None => FileResponse::Error(format!("Zone '{}' not found", zone)),
             }
         }
-        FileRequest::GetFileChunk { zone, name, offset, size } => {
+        FileRequest::GetFileChunk {
+            zone,
+            name,
+            offset,
+            size,
+        } => {
             let manager = zone_manager.read().await;
             match manager.get_zone(&zone) {
                 Some(z) => match z.read_chunk(&name, offset, size) {
@@ -836,7 +1117,9 @@ async fn handle_incoming_request(
             let store = rs_store.read().await;
             match store.file_block_hashes(&name) {
                 Ok(hashes) => FileResponse::RsHave(RsHave { name, hashes }),
-                Err(e) => FileResponse::Error(format!("Failed to read RS block availability: {}", e)),
+                Err(e) => {
+                    FileResponse::Error(format!("Failed to read RS block availability: {}", e))
+                }
             }
         }
         FileRequest::RsDelete { name } => {
@@ -850,5 +1133,40 @@ async fn handle_incoming_request(
             // This is handled inline in the service loop, not here
             FileResponse::Error("GetPeers should be handled inline".to_string())
         }
+        FileRequest::RenewGetVersion => match crate::renew::VersionInfo::current() {
+            Ok(info) => FileResponse::RenewVersion(info),
+            Err(e) => FileResponse::Error(format!("Failed to get version: {}", e)),
+        },
+        FileRequest::RenewGetBinaryChunk { offset, length } => {
+            match get_binary_chunk(offset, length) {
+                Ok((data, is_last)) => FileResponse::RenewBinaryChunk {
+                    offset,
+                    data,
+                    is_last,
+                },
+                Err(e) => FileResponse::Error(format!("Failed to get binary chunk: {}", e)),
+            }
+        }
     }
+}
+
+/// Read a chunk of the current binary for renew protocol.
+fn get_binary_chunk(offset: u64, length: u32) -> crate::Result<(Vec<u8>, bool)> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let exe_path = std::env::current_exe()?;
+    let mut file = std::fs::File::open(&exe_path)?;
+    let file_size = file.metadata()?.len();
+
+    if offset >= file_size {
+        return Ok((Vec::new(), true));
+    }
+
+    file.seek(SeekFrom::Start(offset))?;
+    let mut buf = vec![0u8; length as usize];
+    let n = file.read(&mut buf)?;
+    buf.truncate(n);
+
+    let is_last = offset + n as u64 >= file_size;
+    Ok((buf, is_last))
 }

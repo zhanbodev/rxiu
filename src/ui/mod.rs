@@ -6,4 +6,4 @@
 pub mod browser;
 pub mod terminal;
 
-pub use browser::{FileBrowser, BrowserMode};
+pub use browser::{BrowserMode, FileBrowser};

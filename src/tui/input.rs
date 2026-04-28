@@ -12,7 +12,10 @@ use crate::error::{AppError, Result};
 use crate::rs::RsStore;
 use crate::ui::{BrowserMode, FileBrowser};
 
-use super::app::{App, AppMode, BrowserCallback, LineStyle, OutputLine, PendingAction, PendingOperation, TransferProgress, TransferResult};
+use super::app::{
+    App, AppMode, BrowserCallback, LineStyle, OutputLine, PendingAction, PendingOperation,
+    TransferProgress, TransferResult,
+};
 
 /// Handle a key event based on current mode.
 /// Only processes Press events to avoid double-input on Windows.
@@ -98,7 +101,8 @@ fn execute_command(app: &mut App) -> Result<()> {
     }
 
     // Echo command
-    let prompt = app.current_zone_name()
+    let prompt = app
+        .current_zone_name()
         .map(|n| format!("{}> ", n))
         .unwrap_or_else(|| "> ".to_string());
     app.print(OutputLine::info(format!("{}{}", prompt, input)));
@@ -133,10 +137,12 @@ fn execute_command(app: &mut App) -> Result<()> {
                     Err(e) => app.print(OutputLine::error(format!("Error: {}", e))),
                 }
             }
-        },
+        }
         "get" => {
             if app.rs_mode {
-                app.print(OutputLine::info("RS mode active. Use 'rsget <file_name>' instead."));
+                app.print(OutputLine::info(
+                    "RS mode active. Use 'rsget <file_name>' instead.",
+                ));
                 return Ok(());
             }
             if let Some(file_name) = args.first() {
@@ -144,18 +150,22 @@ fn execute_command(app: &mut App) -> Result<()> {
             } else {
                 app.print(OutputLine::error("Error: Missing argument: file_name"));
             }
-        },
+        }
         "put" => {
             if app.rs_mode {
-                app.print(OutputLine::info("RS mode active. Use 'rsput [name]' instead."));
+                app.print(OutputLine::info(
+                    "RS mode active. Use 'rsput [name]' instead.",
+                ));
                 return Ok(());
             }
             let target_name = args.first().map(|s| s.to_string());
             start_put_browser(app, target_name)?;
-        },
+        }
         "del" | "delete" | "rm" => {
             if app.rs_mode {
-                app.print(OutputLine::info("RS mode active. Use 'rsdel <file_name>' instead."));
+                app.print(OutputLine::info(
+                    "RS mode active. Use 'rsdel <file_name>' instead.",
+                ));
                 return Ok(());
             }
             if let Some(file_name) = args.first() {
@@ -163,10 +173,10 @@ fn execute_command(app: &mut App) -> Result<()> {
             } else {
                 app.print(OutputLine::error("Error: Missing argument: file_name"));
             }
-        },
+        }
         "peers" => {
             execute_peers_list(app);
-        },
+        }
         "remote" => {
             // Old syntax: remote <n> to query zones (for backward compat)
             if let Some(peer_index) = args.first() {
@@ -175,9 +185,11 @@ fn execute_command(app: &mut App) -> Result<()> {
                 // List all peers
                 execute_peers_list(app);
                 app.print(OutputLine::info(""));
-                app.print(OutputLine::info("Use 'ruse <n>' to select a peer, then 'rarea' to see zones."));
+                app.print(OutputLine::info(
+                    "Use 'ruse <n>' to select a peer, then 'rarea' to see zones.",
+                ));
             }
-        },
+        }
         "ruse" => {
             // ruse <n> - select peer, or ruse <zone> - select zone
             if let Some(arg) = args.first() {
@@ -186,11 +198,11 @@ fn execute_command(app: &mut App) -> Result<()> {
                 // Show current selection
                 show_remote_status(app);
             }
-        },
+        }
         "rarea" => {
             // List remote zones from selected peer
             execute_rarea(app);
-        },
+        }
         "rlist" => {
             // List files in selected zone, or rlist <zone> if specified
             if let Some(zone) = args.first() {
@@ -208,16 +220,18 @@ fn execute_command(app: &mut App) -> Result<()> {
                 // List files in current zone
                 execute_rlist(app);
             }
-        },
+        }
         "rget" => {
             // rget <n> - download file by number
             if let Some(file_num) = args.first() {
                 execute_rget(app, file_num);
             } else {
                 app.print(OutputLine::error("Usage: rget <file_number>"));
-                app.print(OutputLine::info("First use 'rlist' to see files with numbers."));
+                app.print(OutputLine::info(
+                    "First use 'rlist' to see files with numbers.",
+                ));
             }
-        },
+        }
         "rs" => {
             if app.rs_mode {
                 app.print(OutputLine::info("Already in RS mode."));
@@ -245,7 +259,9 @@ fn execute_command(app: &mut App) -> Result<()> {
             if let Some(arg) = args.first() {
                 execute_rs_have(app, arg);
             } else {
-                app.print(OutputLine::error("Usage: rshave <number> | rshave <file_name>"));
+                app.print(OutputLine::error(
+                    "Usage: rshave <number> | rshave <file_name>",
+                ));
             }
         }
         "rspeers" => {
@@ -262,7 +278,9 @@ fn execute_command(app: &mut App) -> Result<()> {
             if let Some(file_name) = args.first() {
                 if let Ok(index) = file_name.parse::<usize>() {
                     if index == 0 || index > app.rs_files_cache.len() {
-                        app.print(OutputLine::error("Invalid RS file number. Use 'rslist' first."));
+                        app.print(OutputLine::error(
+                            "Invalid RS file number. Use 'rslist' first.",
+                        ));
                         return Ok(());
                     }
                     let name = app.rs_files_cache[index - 1].name.clone();
@@ -271,14 +289,18 @@ fn execute_command(app: &mut App) -> Result<()> {
                     start_rs_get_browser(app, file_name.to_string())?;
                 }
             } else {
-                app.print(OutputLine::error("Usage: rsget <number> | rsget <file_name>"));
+                app.print(OutputLine::error(
+                    "Usage: rsget <number> | rsget <file_name>",
+                ));
             }
         }
         "rsdel" => {
             if let Some(arg) = args.first() {
                 if let Ok(index) = arg.parse::<usize>() {
                     if index == 0 || index > app.rs_files_cache.len() {
-                        app.print(OutputLine::error("Invalid RS file number. Use 'rslist' first."));
+                        app.print(OutputLine::error(
+                            "Invalid RS file number. Use 'rslist' first.",
+                        ));
                         return Ok(());
                     }
                     let name = app.rs_files_cache[index - 1].name.clone();
@@ -287,7 +309,9 @@ fn execute_command(app: &mut App) -> Result<()> {
                     start_rs_delete_confirmation(app, arg.to_string())?;
                 }
             } else {
-                app.print(OutputLine::error("Usage: rsdel <number> | rsdel <file_name>"));
+                app.print(OutputLine::error(
+                    "Usage: rsdel <number> | rsdel <file_name>",
+                ));
             }
         }
         "rscfg" => {
@@ -298,12 +322,14 @@ fn execute_command(app: &mut App) -> Result<()> {
         }
         "help" | "?" => {
             app.print_multiline(&commands::help(), LineStyle::Normal);
-        },
+        }
         "exit" | "quit" | "q" => {
             app.should_quit = true;
-        },
+        }
         _ => {
-            app.print(OutputLine::error("Error: Invalid command. Type 'help' for available commands"));
+            app.print(OutputLine::error(
+                "Error: Invalid command. Type 'help' for available commands",
+            ));
         }
     }
 
@@ -313,14 +339,18 @@ fn execute_command(app: &mut App) -> Result<()> {
 /// Execute `list area` command.
 fn execute_list_area(app: &mut App) {
     // Collect to owned strings to avoid borrow issues
-    let zones: Vec<String> = app.zone_manager.list_zones()
+    let zones: Vec<String> = app
+        .zone_manager
+        .list_zones()
         .iter()
         .map(|s| s.to_string())
         .collect();
     let active = app.zone_manager.active_zone_name().map(|s| s.to_string());
 
     if zones.is_empty() {
-        app.print(OutputLine::info("No zones exist. Use 'create <name>' to create one."));
+        app.print(OutputLine::info(
+            "No zones exist. Use 'create <name>' to create one.",
+        ));
         return;
     }
 
@@ -329,7 +359,11 @@ fn execute_list_area(app: &mut App) {
     app.print(OutputLine::header("─".repeat(40)));
 
     for zone in &zones {
-        let marker = if active.as_deref() == Some(zone.as_str()) { "  ●" } else { "" };
+        let marker = if active.as_deref() == Some(zone.as_str()) {
+            "  ●"
+        } else {
+            ""
+        };
         app.print(OutputLine::normal(format!("{:<20}{}", zone, marker)));
     }
 
@@ -341,17 +375,22 @@ fn execute_list_storage(app: &mut App) {
     let home = match dirs::home_dir() {
         Some(p) => p,
         None => {
-            app.print(OutputLine::error("Error: Could not determine home directory"));
+            app.print(OutputLine::error(
+                "Error: Could not determine home directory",
+            ));
             return;
         }
     };
 
     let storage_root = home.join(".rxiu");
-    
+
     app.print(OutputLine::header(""));
     app.print(OutputLine::header("Storage Location"));
     app.print(OutputLine::header("─".repeat(50)));
-    app.print(OutputLine::normal(format!("Root: {}", storage_root.display())));
+    app.print(OutputLine::normal(format!(
+        "Root: {}",
+        storage_root.display()
+    )));
     app.print(OutputLine::normal(""));
 
     let zones_dir = storage_root.join("zones");
@@ -380,20 +419,35 @@ fn execute_peers_list(app: &mut App) {
 
     if app.peers_cache.is_empty() {
         app.print(OutputLine::info("No peers discovered on LAN yet."));
-        app.print(OutputLine::info("Make sure other rxiu instances are running on your network."));
+        app.print(OutputLine::info(
+            "Make sure other rxiu instances are running on your network.",
+        ));
         app.print(OutputLine::info(""));
-        app.print(OutputLine::info("Peers are discovered automatically via mDNS."));
+        app.print(OutputLine::info(
+            "Peers are discovered automatically via mDNS.",
+        ));
     } else {
         // Collect peer info first to avoid borrow issues
         let peer_count = app.peers_cache.len();
-        let peer_lines: Vec<String> = app.peers_cache.iter().enumerate().map(|(i, peer)| {
-            let peer_id_str = peer.peer_id.to_string();
-            let short_id = if peer_id_str.len() >= 12 { &peer_id_str[..12] } else { &peer_id_str };
-            let addr = peer.addrs.first()
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            format!("  [{}] {} - {}", i + 1, short_id, addr)
-        }).collect();
+        let peer_lines: Vec<String> = app
+            .peers_cache
+            .iter()
+            .enumerate()
+            .map(|(i, peer)| {
+                let peer_id_str = peer.peer_id.to_string();
+                let short_id = if peer_id_str.len() >= 12 {
+                    &peer_id_str[..12]
+                } else {
+                    &peer_id_str
+                };
+                let addr = peer
+                    .addrs
+                    .first()
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                format!("  [{}] {} - {}", i + 1, short_id, addr)
+            })
+            .collect();
 
         app.print(OutputLine::header(""));
         app.print(OutputLine::header(format!("LAN PEERS ({})", peer_count)));
@@ -414,7 +468,9 @@ fn execute_remote_query(app: &mut App, index_str: &str) {
 
     let peers_len = app.peers_cache.len();
     if peers_len == 0 {
-        app.print(OutputLine::error("No peers available. Run 'peers' to see discovered peers."));
+        app.print(OutputLine::error(
+            "No peers available. Run 'peers' to see discovered peers.",
+        ));
         return;
     }
 
@@ -423,7 +479,8 @@ fn execute_remote_query(app: &mut App, index_str: &str) {
         Ok(n) if n >= 1 && n <= peers_len => n - 1,
         _ => {
             app.print(OutputLine::error(format!(
-                "Invalid peer number. Use 1-{}", peers_len
+                "Invalid peer number. Use 1-{}",
+                peers_len
             )));
             return;
         }
@@ -452,21 +509,33 @@ fn execute_ruse(app: &mut App, arg: &str) {
             app.remote.zone = None;
             app.remote.zones_cache.clear();
             app.remote.files_cache.clear();
-            
+
             let peer_id_str = app.peers_cache[n - 1].peer_id.to_string();
-            let short_id = if peer_id_str.len() >= 12 { &peer_id_str[..12] } else { &peer_id_str };
-            app.print(OutputLine::success(format!("✓ Connected to peer [{}] {}", n, short_id)));
+            let short_id = if peer_id_str.len() >= 12 {
+                &peer_id_str[..12]
+            } else {
+                &peer_id_str
+            };
+            app.print(OutputLine::success(format!(
+                "✓ Connected to peer [{}] {}",
+                n, short_id
+            )));
             app.print(OutputLine::info("Use 'rarea' to see zones."));
         } else {
-            app.print(OutputLine::error(format!("Invalid peer number. Use 1-{}", peers_len)));
+            app.print(OutputLine::error(format!(
+                "Invalid peer number. Use 1-{}",
+                peers_len
+            )));
         }
     } else {
         // Treat as zone name
         if app.remote.peer_index.is_none() {
-            app.print(OutputLine::error("No peer selected. Use 'ruse <n>' first to select a peer."));
+            app.print(OutputLine::error(
+                "No peer selected. Use 'ruse <n>' first to select a peer.",
+            ));
             return;
         }
-        
+
         app.remote.zone = Some(arg.to_string());
         app.remote.files_cache.clear();
         app.print(OutputLine::success(format!("✓ Selected zone: {}", arg)));
@@ -479,26 +548,39 @@ fn show_remote_status(app: &mut App) {
     app.print(OutputLine::header(""));
     app.print(OutputLine::header("REMOTE CONNECTION STATUS"));
     app.print(OutputLine::header("─".repeat(50)));
-    
+
     match app.remote.peer_index {
         Some(idx) if idx < app.peers_cache.len() => {
             let peer_id_str = app.peers_cache[idx].peer_id.to_string();
-            let short_id = if peer_id_str.len() >= 12 { &peer_id_str[..12] } else { &peer_id_str };
-            app.print(OutputLine::normal(format!("  Peer: [{}] {}", idx + 1, short_id)));
+            let short_id = if peer_id_str.len() >= 12 {
+                &peer_id_str[..12]
+            } else {
+                &peer_id_str
+            };
+            app.print(OutputLine::normal(format!(
+                "  Peer: [{}] {}",
+                idx + 1,
+                short_id
+            )));
         }
         _ => {
             app.print(OutputLine::normal("  Peer: (none)"));
         }
     }
-    
+
     match &app.remote.zone {
         Some(z) => app.print(OutputLine::normal(format!("  Zone: {}", z))),
         None => app.print(OutputLine::normal("  Zone: (none)")),
     }
-    
-    app.print(OutputLine::normal(format!("  Cached files: {}", app.remote.files_cache.len())));
+
+    app.print(OutputLine::normal(format!(
+        "  Cached files: {}",
+        app.remote.files_cache.len()
+    )));
     app.print(OutputLine::normal(""));
-    app.print(OutputLine::info("Commands: ruse <n>, rarea, rlist, rget <n>"));
+    app.print(OutputLine::info(
+        "Commands: ruse <n>, rarea, rlist, rget <n>",
+    ));
 }
 
 /// Execute `rarea` - list zones from selected peer.
@@ -507,13 +589,13 @@ fn execute_rarea(app: &mut App) {
         app.print(OutputLine::error("P2P network not started."));
         return;
     }
-    
+
     if app.remote.peer_index.is_none() {
         app.print(OutputLine::error("No peer selected. Use 'ruse <n>' first."));
         execute_peers_list(app);
         return;
     }
-    
+
     app.pending_op = Some(PendingOperation::QuerySelectedZones);
     app.print(OutputLine::info("Querying zones..."));
 }
@@ -524,17 +606,19 @@ fn execute_rlist(app: &mut App) {
         app.print(OutputLine::error("P2P network not started."));
         return;
     }
-    
+
     if app.remote.peer_index.is_none() {
         app.print(OutputLine::error("No peer selected. Use 'ruse <n>' first."));
         return;
     }
-    
+
     if app.remote.zone.is_none() {
-        app.print(OutputLine::error("No zone selected. Use 'ruse <zone>' or 'rlist <zone>'."));
+        app.print(OutputLine::error(
+            "No zone selected. Use 'ruse <zone>' or 'rlist <zone>'.",
+        ));
         return;
     }
-    
+
     app.pending_op = Some(PendingOperation::QuerySelectedFiles);
     app.print(OutputLine::info("Listing files..."));
 }
@@ -554,7 +638,10 @@ fn execute_rs_stats(app: &mut App) {
     let files = match app.rs_store.list_files() {
         Ok(files) => files,
         Err(e) => {
-            app.print(OutputLine::error(format!("Failed to read RS metadata: {}", e)));
+            app.print(OutputLine::error(format!(
+                "Failed to read RS metadata: {}",
+                e
+            )));
             return;
         }
     };
@@ -576,17 +663,31 @@ fn execute_rs_stats(app: &mut App) {
     app.print(OutputLine::header(""));
     app.print(OutputLine::header("RS STATS"));
     app.print(OutputLine::header("─".repeat(40)));
-    app.print(OutputLine::normal(format!("  Files: {} ({} complete, {} partial)", total_files, complete, partial)));
-    app.print(OutputLine::normal(format!("  Blocks in metadata: {}", total_blocks)));
-    app.print(OutputLine::normal(format!("  Local blocks: {}", local_block_count)));
-    app.print(OutputLine::normal(format!("  Local block size: {}", TransferProgress::format_size(local_block_bytes))));
+    app.print(OutputLine::normal(format!(
+        "  Files: {} ({} complete, {} partial)",
+        total_files, complete, partial
+    )));
+    app.print(OutputLine::normal(format!(
+        "  Blocks in metadata: {}",
+        total_blocks
+    )));
+    app.print(OutputLine::normal(format!(
+        "  Local blocks: {}",
+        local_block_count
+    )));
+    app.print(OutputLine::normal(format!(
+        "  Local block size: {}",
+        TransferProgress::format_size(local_block_bytes)
+    )));
     app.print(OutputLine::normal(format!("  Block size: {} MB", block_mb)));
 }
 
 fn execute_rs_have(app: &mut App, arg: &str) {
     let name = if let Ok(index) = arg.parse::<usize>() {
         if index == 0 || index > app.rs_files_cache.len() {
-            app.print(OutputLine::error("Invalid RS file number. Use 'rslist' first."));
+            app.print(OutputLine::error(
+                "Invalid RS file number. Use 'rslist' first.",
+            ));
             return;
         }
         app.rs_files_cache[index - 1].name.clone()
@@ -620,8 +721,13 @@ fn execute_rs_have(app: &mut App, arg: &str) {
     app.print(OutputLine::header(""));
     app.print(OutputLine::header(format!("RS HAVE: {}", entry.name)));
     app.print(OutputLine::header("─".repeat(40)));
-    app.print(OutputLine::normal(format!("  Blocks: {}/{}", have_blocks, entry.blocks.len())));
-    app.print(OutputLine::normal(format!("  Bytes: {}/{} ({}%)",
+    app.print(OutputLine::normal(format!(
+        "  Blocks: {}/{}",
+        have_blocks,
+        entry.blocks.len()
+    )));
+    app.print(OutputLine::normal(format!(
+        "  Bytes: {}/{} ({}%)",
         TransferProgress::format_size(have_bytes),
         TransferProgress::format_size(entry.size),
         percent
@@ -633,7 +739,7 @@ fn execute_rs_peers(app: &mut App) {
         app.print(OutputLine::error("P2P network not started."));
         return;
     }
-    
+
     // Trigger LAN peer refresh
     app.print(OutputLine::info("Refreshing LAN peers..."));
     if let Some(p2p) = app.p2p.clone() {
@@ -641,21 +747,34 @@ fn execute_rs_peers(app: &mut App) {
             let _ = p2p.refresh_peers().await;
         });
     }
-    
+
     // Show current peers (refresh happens async, user can run rspeers again to see updated list)
     if app.peers_cache.is_empty() {
-        app.print(OutputLine::info("No peers discovered on LAN yet. Please wait and try again."));
+        app.print(OutputLine::info(
+            "No peers discovered on LAN yet. Please wait and try again.",
+        ));
         return;
     }
     let peer_count = app.peers_cache.len();
-    let peer_lines: Vec<String> = app.peers_cache.iter().enumerate().map(|(i, peer)| {
-        let peer_id_str = peer.peer_id.to_string();
-        let short_id = if peer_id_str.len() >= 12 { &peer_id_str[..12] } else { &peer_id_str };
-        let addr = peer.addrs.first()
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        format!("  [{}] {} - {}", i + 1, short_id, addr)
-    }).collect();
+    let peer_lines: Vec<String> = app
+        .peers_cache
+        .iter()
+        .enumerate()
+        .map(|(i, peer)| {
+            let peer_id_str = peer.peer_id.to_string();
+            let short_id = if peer_id_str.len() >= 12 {
+                &peer_id_str[..12]
+            } else {
+                &peer_id_str
+            };
+            let addr = peer
+                .addrs
+                .first()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("  [{}] {} - {}", i + 1, short_id, addr)
+        })
+        .collect();
     app.print(OutputLine::header(""));
     app.print(OutputLine::header(format!("RS PEERS ({})", peer_count)));
     app.print(OutputLine::header("─".repeat(60)));
@@ -688,6 +807,9 @@ fn execute_rscfg(app: &mut App, args: &[&str]) {
             rs_sync_concurrency: app.rs_sync_concurrency,
             rs_block_size_mb: app.rs_block_size_mb,
             rs_global_sync: app.rs_global_sync,
+            rs_replication_factor: 2,
+            renew_enabled: true,
+            renew_check_interval: 300,
         };
         if let Err(e) = config.save() {
             app.print(OutputLine::error(format!("Failed to save config: {}", e)));
@@ -705,9 +827,7 @@ fn execute_rscfg(app: &mut App, args: &[&str]) {
                 save_config(app);
             }
             _ => {
-                app.print(OutputLine::error(
-                    "Usage: rscfg concurrency <2-16>",
-                ));
+                app.print(OutputLine::error("Usage: rscfg concurrency <2-16>"));
             }
         },
         ["sync_concurrency", value] => match value.parse::<usize>() {
@@ -720,9 +840,7 @@ fn execute_rscfg(app: &mut App, args: &[&str]) {
                 save_config(app);
             }
             _ => {
-                app.print(OutputLine::error(
-                    "Usage: rscfg sync_concurrency <2-16>",
-                ));
+                app.print(OutputLine::error("Usage: rscfg sync_concurrency <2-16>"));
             }
         },
         ["block_size", value] => match value.parse::<u64>() {
@@ -735,20 +853,22 @@ fn execute_rscfg(app: &mut App, args: &[&str]) {
                 save_config(app);
             }
             _ => {
-                app.print(OutputLine::error(
-                    "Usage: rscfg block_size <4-32>",
-                ));
+                app.print(OutputLine::error("Usage: rscfg block_size <4-32>"));
             }
         },
         ["gsyn", value] => match *value {
             "0" => {
                 app.rs_global_sync = false;
-                app.print(OutputLine::success("RS global sync set to 0 (RS mode only)."));
+                app.print(OutputLine::success(
+                    "RS global sync set to 0 (RS mode only).",
+                ));
                 save_config(app);
             }
             "1" => {
                 app.rs_global_sync = true;
-                app.print(OutputLine::success("RS global sync set to 1 (always sync)."));
+                app.print(OutputLine::success(
+                    "RS global sync set to 1 (always sync).",
+                ));
                 save_config(app);
             }
             _ => {
@@ -766,18 +886,20 @@ fn execute_rscfg(app: &mut App, args: &[&str]) {
                 "RS sync concurrency: {}",
                 app.rs_sync_concurrency
             )));
-            app.print(OutputLine::info(format!(
-                "RS block size: {} MB",
-                block_mb
-            )));
-            app.print(OutputLine::info(format!(
-                "RS global sync: {}",
-                gsyn
-            )));
-            app.print(OutputLine::info("Use 'rscfg concurrency <2-16>' to change download concurrency."));
-            app.print(OutputLine::info("Use 'rscfg sync_concurrency <2-16>' to change sync concurrency."));
-            app.print(OutputLine::info("Use 'rscfg block_size <4-32>' to change RS block size."));
-            app.print(OutputLine::info("Use 'rscfg gsyn <0|1>' to toggle global sync."));
+            app.print(OutputLine::info(format!("RS block size: {} MB", block_mb)));
+            app.print(OutputLine::info(format!("RS global sync: {}", gsyn)));
+            app.print(OutputLine::info(
+                "Use 'rscfg concurrency <2-16>' to change download concurrency.",
+            ));
+            app.print(OutputLine::info(
+                "Use 'rscfg sync_concurrency <2-16>' to change sync concurrency.",
+            ));
+            app.print(OutputLine::info(
+                "Use 'rscfg block_size <4-32>' to change RS block size.",
+            ));
+            app.print(OutputLine::info(
+                "Use 'rscfg gsyn <0|1>' to toggle global sync.",
+            ));
         }
         _ => {
             app.print(OutputLine::error("Usage: rscfg show | rscfg concurrency <2-16> | rscfg sync_concurrency <2-16> | rscfg block_size <4-32> | rscfg gsyn <0|1>"));
@@ -841,37 +963,40 @@ fn execute_rget(app: &mut App, file_num_str: &str) {
         app.print(OutputLine::error("P2P network not started."));
         return;
     }
-    
+
     if app.remote.peer_index.is_none() {
         app.print(OutputLine::error("No peer selected. Use 'ruse <n>' first."));
         return;
     }
-    
+
     if app.remote.zone.is_none() {
-        app.print(OutputLine::error("No zone selected. Use 'ruse <zone>' first."));
+        app.print(OutputLine::error(
+            "No zone selected. Use 'ruse <zone>' first.",
+        ));
         return;
     }
-    
+
     if app.remote.files_cache.is_empty() {
         app.print(OutputLine::error("No files cached. Use 'rlist' first."));
         return;
     }
-    
+
     // Parse file number
     let file_num: usize = match file_num_str.parse::<usize>() {
         Ok(n) if n >= 1 && n <= app.remote.files_cache.len() => n - 1,
         _ => {
             app.print(OutputLine::error(format!(
-                "Invalid file number. Use 1-{}", app.remote.files_cache.len()
+                "Invalid file number. Use 1-{}",
+                app.remote.files_cache.len()
             )));
             return;
         }
     };
-    
+
     let file_name = app.remote.files_cache[file_num].name.clone();
     let peer_index = app.remote.peer_index.unwrap();
     let zone = app.remote.zone.clone().unwrap();
-    
+
     // Try directories in order, checking if we can actually access them
     let possible_dirs = [
         dirs::home_dir(),
@@ -879,12 +1004,13 @@ fn execute_rget(app: &mut App, file_num_str: &str) {
         dirs::download_dir(),
         Some(std::path::PathBuf::from(".")),
     ];
-    
-    let start_dir = possible_dirs.into_iter()
+
+    let start_dir = possible_dirs
+        .into_iter()
         .flatten()
         .find(|p| p.exists() && std::fs::read_dir(p).is_ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    
+
     match FileBrowser::new(&start_dir, BrowserMode::SelectDirectory) {
         Ok(browser) => {
             app.mode = AppMode::Browser {
@@ -900,20 +1026,26 @@ fn execute_rget(app: &mut App, file_num_str: &str) {
         }
         Err(e) => {
             // If browser still fails, offer to save to current directory
-            app.print(OutputLine::error(format!("Failed to open directory browser: {}", e)));
-            app.print(OutputLine::info("Try running from a directory you have permission to access."));
+            app.print(OutputLine::error(format!(
+                "Failed to open directory browser: {}",
+                e
+            )));
+            app.print(OutputLine::info(
+                "Try running from a directory you have permission to access.",
+            ));
         }
     }
 }
-
-
 
 /// Start file browser for `get` command.
 fn start_get_browser(app: &mut App, file_name: String) -> Result<()> {
     // Verify file exists
     let zone = app.zone_manager.active_zone()?;
     if !zone.exists(&file_name) {
-        app.print(OutputLine::error(format!("Error: File '{}' not found in zone", file_name)));
+        app.print(OutputLine::error(format!(
+            "Error: File '{}' not found in zone",
+            file_name
+        )));
         return Ok(());
     }
 
@@ -956,11 +1088,16 @@ fn start_delete_confirmation(app: &mut App, file_name: String) -> Result<()> {
     // Verify file exists
     let zone = app.zone_manager.active_zone()?;
     if !zone.exists(&file_name) {
-        app.print(OutputLine::error(format!("Error: File '{}' not found in zone", file_name)));
+        app.print(OutputLine::error(format!(
+            "Error: File '{}' not found in zone",
+            file_name
+        )));
         return Ok(());
     }
 
-    let zone_name = app.zone_manager.active_zone_name()
+    let zone_name = app
+        .zone_manager
+        .active_zone_name()
         .map(|s| s.to_string())
         .unwrap_or_default();
 
@@ -976,7 +1113,11 @@ fn start_delete_confirmation(app: &mut App, file_name: String) -> Result<()> {
 fn handle_browser_input(app: &mut App, key: KeyEvent) -> Result<()> {
     // Extract browser temporarily
     let (mut browser, mode, callback) = match std::mem::replace(&mut app.mode, AppMode::Normal) {
-        AppMode::Browser { browser, mode, callback } => (browser, mode, callback),
+        AppMode::Browser {
+            browser,
+            mode,
+            callback,
+        } => (browser, mode, callback),
         other => {
             app.mode = other;
             return Ok(());
@@ -991,7 +1132,11 @@ fn handle_browser_input(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         Ok(None) => {
             // Continue browsing
-            app.mode = AppMode::Browser { browser, mode, callback };
+            app.mode = AppMode::Browser {
+                browser,
+                mode,
+                callback,
+            };
         }
         Err(AppError::Cancelled) => {
             app.clear_status();
@@ -1055,7 +1200,11 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
                 metadata.formatted_size()
             )));
         }
-        BrowserCallback::RemoteGet { peer_index, zone, file_name } => {
+        BrowserCallback::RemoteGet {
+            peer_index,
+            zone,
+            file_name,
+        } => {
             // Queue the download operation with the selected save path
             app.pending_op = Some(PendingOperation::DownloadFile {
                 peer_index,
@@ -1079,7 +1228,7 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
 
             // Get file size for progress
             let file_size = std::fs::metadata(&path)?.len();
-            
+
             // Start upload progress
             app.transfer.start_upload(&name, file_size);
             app.print(OutputLine::info(format!(
@@ -1089,7 +1238,11 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
             )));
 
             let (members, algo) = if let Some(ref p2p) = app.p2p {
-                let mut ids: Vec<String> = app.peers_cache.iter().map(|p| p.peer_id.to_string()).collect();
+                let mut ids: Vec<String> = app
+                    .peers_cache
+                    .iter()
+                    .map(|p| p.peer_id.to_string())
+                    .collect();
                 ids.push(p2p.local_peer_id().to_string());
                 ids.sort();
                 (ids, "hrw-v1".to_string())
@@ -1103,7 +1256,7 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
             let path = path.clone();
             let name = name.clone();
             let block_size_bytes = app.rs_block_size_mb * 1024 * 1024;
-            
+
             // Create channel for result
             let (tx, rx) = tokio::sync::mpsc::channel::<TransferResult>(16);
             app.transfer_rx = Some(rx);
@@ -1114,32 +1267,44 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
                 let rs_store = match RsStore::new() {
                     Ok(store) => store,
                     Err(e) => {
-                        let _ = tx.send(TransferResult::Error {
-                            file_name: name,
-                            error: e.to_string(),
-                        }).await;
+                        let _ = tx
+                            .send(TransferResult::Error {
+                                file_name: name,
+                                error: e.to_string(),
+                            })
+                            .await;
                         return;
                     }
                 };
 
                 // Put file to RS store
-                let entry = match rs_store.put_file_from_path(&path, &name, members, &algo, block_size_bytes) {
+                let entry = match rs_store.put_file_from_path(
+                    &path,
+                    &name,
+                    members,
+                    &algo,
+                    block_size_bytes,
+                ) {
                     Ok(entry) => entry,
                     Err(e) => {
-                        let _ = tx.send(TransferResult::Error {
-                            file_name: name,
-                            error: e.to_string(),
-                        }).await;
+                        let _ = tx
+                            .send(TransferResult::Error {
+                                file_name: name,
+                                error: e.to_string(),
+                            })
+                            .await;
                         return;
                     }
                 };
 
                 // Send progress update
-                let _ = tx.send(TransferResult::Progress {
-                    file_name: name.clone(),
-                    bytes_done: file_size / 2,
-                    bytes_total: file_size,
-                }).await;
+                let _ = tx
+                    .send(TransferResult::Progress {
+                        file_name: name.clone(),
+                        bytes_done: file_size / 2,
+                        bytes_total: file_size,
+                    })
+                    .await;
 
                 // Announce to peers
                 if let Some(p2p) = p2p {
@@ -1149,13 +1314,19 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
                 }
 
                 // Send success
-                let hash = entry.blocks.first().map(|b| b.hash.clone()).unwrap_or_default();
-                let _ = tx.send(TransferResult::Success {
-                    file_name: name,
-                    path,
-                    size: file_size,
-                    hash,
-                }).await;
+                let hash = entry
+                    .blocks
+                    .first()
+                    .map(|b| b.hash.clone())
+                    .unwrap_or_default();
+                let _ = tx
+                    .send(TransferResult::Success {
+                        file_name: name,
+                        path,
+                        size: file_size,
+                        hash,
+                    })
+                    .await;
             });
         }
         BrowserCallback::RsGet { file_name } => {
@@ -1163,7 +1334,10 @@ fn complete_browser_action(app: &mut App, path: PathBuf, callback: BrowserCallba
                 file_name: file_name.clone(),
                 save_path: path,
             });
-            app.print(OutputLine::info(format!("Downloading RS file '{}'...", file_name)));
+            app.print(OutputLine::info(format!(
+                "Downloading RS file '{}'...",
+                file_name
+            )));
         }
     }
     Ok(())

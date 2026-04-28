@@ -15,8 +15,14 @@ pub fn create(manager: &mut ZoneManager, args: &[&str]) -> Result<String> {
     let name = args.first().ok_or(AppError::MissingArgument("zone_name"))?;
 
     // Validate zone name (alphanumeric and underscores only)
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Ok("Error: Zone name can only contain letters, numbers, underscores, and hyphens".to_string());
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Ok(
+            "Error: Zone name can only contain letters, numbers, underscores, and hyphens"
+                .to_string(),
+        );
     }
 
     manager.create_zone(name)?;
@@ -40,7 +46,12 @@ pub fn list(manager: &ZoneManager) -> Result<String> {
     }
 
     // Calculate column widths
-    let max_name = files.iter().map(|f| f.name.len()).max().unwrap_or(10).max(10);
+    let max_name = files
+        .iter()
+        .map(|f| f.name.len())
+        .max()
+        .unwrap_or(10)
+        .max(10);
     let max_size = 10;
 
     // Build table
@@ -135,7 +146,11 @@ pub fn put(manager: &ZoneManager, args: &[&str]) -> Result<String> {
     // Determine the name to use in the zone
     let file_name = target_name
         .map(String::from)
-        .or_else(|| source_path.file_name().map(|n| n.to_string_lossy().to_string()))
+        .or_else(|| {
+            source_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
         .ok_or(AppError::NotAFile(source_path.clone()))?;
 
     // Check if file already exists in zone
