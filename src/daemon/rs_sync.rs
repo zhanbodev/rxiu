@@ -213,15 +213,16 @@ async fn sync_rs_missing_blocks(
             let p2p = p2p.clone();
             let peers = peer_ids.clone();
             let rs_store = rs_store.clone();
+            let block_hash = block.hash.clone();
             tasks.push(async move {
                 let _permit = sem
                     .acquire()
                     .await
-                    .map_err(|_| AppError::Io(std::io::Error::other("RS sync semaphore closed")))?;
+                    .map_err(|_| (block_hash.clone(), AppError::Io(std::io::Error::other("RS sync semaphore closed"))))?;
                 if peers.is_empty() {
-                    return Err(AppError::Io(std::io::Error::other(
+                    return Err((block_hash, AppError::Io(std::io::Error::other(
                         "No peers available for RS sync",
-                    )));
+                    ))));
                 }
                 let mut fetched = None;
                 for cycle in 0..3 {
@@ -238,17 +239,25 @@ async fn sync_rs_missing_blocks(
                     tokio::time::sleep(Duration::from_millis(200 * (cycle + 1))).await;
                 }
                 let block_data = fetched.ok_or_else(|| {
-                    AppError::Io(std::io::Error::other("Failed to fetch RS block"))
+                    (block_hash.clone(), AppError::Io(std::io::Error::other("Failed to fetch RS block")))
                 })?;
                 rs_store
                     .read()
                     .await
-                    .verify_and_write_block(&block.hash, &block_data.data)?;
-                Ok::<(), AppError>(())
+                    .verify_and_write_block(&block.hash, &block_data.data)
+                    .map_err(|e| (block_hash.clone(), e))?;
+                Ok::<_, (String, AppError)>(())
             });
         }
+        let mut failed_blocks = 0usize;
         while let Some(result) = tasks.next().await {
-            result?;
+            if let Err((hash, e)) = result {
+                tracing::warn!("[RsSync] Block {} failed: {}", &hash[..8.min(hash.len())], e);
+                failed_blocks += 1;
+            }
+        }
+        if failed_blocks > 0 {
+            tracing::warn!("[RsSync] {} blocks failed for file '{}'", failed_blocks, entry.name);
         }
         let all_have = {
             let store = rs_store.read().await;

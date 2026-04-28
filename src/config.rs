@@ -27,7 +27,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             rs_concurrency: 8,
-            rs_sync_concurrency: 4,
+            rs_sync_concurrency: 8,
             rs_block_size_mb: 16,
             rs_global_sync: true,
             rs_replication_factor: 2,

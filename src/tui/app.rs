@@ -238,7 +238,12 @@ async fn download_rs_file(
     if entry.blocks.is_empty() {
         if let Some(ref p2p) = p2p {
             for peer in &peers {
-                if let Ok(meta) = p2p.rs_get_meta(*peer, file_name).await {
+                // Add timeout to prevent blocking on slow peers
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    p2p.rs_get_meta(*peer, file_name)
+                ).await;
+                if let Ok(Ok(meta)) = result {
                     rs_store.apply_remote_meta(meta.clone())?;
                     entry = meta;
                     break;
@@ -293,10 +298,17 @@ async fn download_rs_file(
             let p2p = p2p.clone();
             let peer = *peer;
             let name = name.clone();
-            tasks.push(async move { (idx, p2p.rs_have(peer, &name).await) });
+            tasks.push(async move { 
+                // Add timeout to prevent blocking on slow peers
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    p2p.rs_have(peer, &name)
+                ).await;
+                (idx, result.ok().and_then(|r| r.ok()))
+            });
         }
         while let Some((idx, result)) = tasks.next().await {
-            if let Ok(have) = result {
+            if let Some(have) = result {
                 for hash in have.hashes {
                     let entry = availability.entry(hash).or_default();
                     if !entry.contains(&idx) {

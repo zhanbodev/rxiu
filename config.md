@@ -11,7 +11,7 @@
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `rs_concurrency` | 整数 | `8` | RS 下载并发数 |
-| `rs_sync_concurrency` | 整数 | `4` | RS 后台同步并发数 |
+| `rs_sync_concurrency` | 整数 | `8` | RS 后台同步并发数 |
 | `rs_block_size_mb` | 整数 | `16` | RS 文件块大小（MB） |
 | `rs_global_sync` | 布尔 | `true` | 全局同步开关 |
 | `rs_replication_factor` | 整数 | `2` | 副本因子 |
